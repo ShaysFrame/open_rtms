@@ -7,8 +7,8 @@ class CameraService {
   CameraService(this.cameras);
 
   Future<CameraController> initializeCamera(
-      [CameraLensDirection preferredDirection =
-          CameraLensDirection.front]) async {
+      {CameraLensDirection preferredDirection = CameraLensDirection.front,
+      ResolutionPreset resolution = ResolutionPreset.medium}) async {
     if (cameras.isEmpty) {
       throw Exception('No cameras available');
     }
@@ -21,7 +21,7 @@ class CameraService {
 
     final controller = CameraController(
       camera,
-      ResolutionPreset.medium,
+      resolution,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.yuv420,
     );

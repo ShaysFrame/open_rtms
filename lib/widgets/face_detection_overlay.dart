@@ -6,6 +6,7 @@ class FaceDetectionOverlay extends StatelessWidget {
   final Map<String, Map<String, dynamic>> recognizedStudents;
   final Size previewSize;
   final Size screenSize;
+  final bool isFrontCamera;
 
   const FaceDetectionOverlay({
     super.key,
@@ -13,6 +14,7 @@ class FaceDetectionOverlay extends StatelessWidget {
     required this.recognizedStudents,
     required this.previewSize,
     required this.screenSize,
+    this.isFrontCamera = false,
   });
 
   @override
@@ -44,77 +46,93 @@ class FaceDetectionPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Print debug info
+    print("📱 Painting overlay with ${detections.length} detections");
+    print("📱 Preview size: ${previewSize.width}x${previewSize.height}");
+    print("📱 Screen size: ${screenSize.width}x${screenSize.height}");
+
+    if (detections.isEmpty) return;
+
+    // Calculate scale factors between camera and display coordinates
+    // This is similar to the YOLO example code you shared
     final double scaleX = screenSize.width / previewSize.width;
     final double scaleY = screenSize.height / previewSize.height;
 
-    final Paint unknownBoxPaint = Paint()
-      ..color = Colors.yellow
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
+    print("📱 Scale factors: $scaleX, $scaleY");
 
     final Paint recognizedBoxPaint = Paint()
       ..color = Colors.green
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0;
 
+    final Paint unknownBoxPaint = Paint()
+      ..color = Colors.yellow
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
     final Paint backgroundPaint = Paint()
       ..color = Colors.black.withOpacity(0.6)
       ..style = PaintingStyle.fill;
 
-    for (final detection in detections) {
-      final x = (detection['box'][0] as double) * scaleX;
-      final y = (detection['box'][1] as double) * scaleY;
-      final w = (detection['box'][2] as double) * scaleX;
-      final h = (detection['box'][3] as double) * scaleY;
+    final TextStyle textStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 14,
+      fontWeight: FontWeight.bold,
+      background: Paint()..color = Colors.black.withOpacity(0.6),
+    );
 
-      final rect = Rect.fromLTWH(x, y, w, h);
+    for (final detection in detections) {
+      // Get box coordinates (x, y, w, h)
+      final double x = detection['box'][0] as double;
+      final double y = detection['box'][1] as double;
+      final double w = detection['box'][2] as double;
+      final double h = detection['box'][3] as double;
+
+      // Scale the coordinates to the screen size
+      final double scaledX = x * scaleX;
+      final double scaledY = y * scaleY;
+      final double scaledW = w * scaleX;
+      final double scaledH = h * scaleY;
+
+      // Create the rectangle
+      final Rect rect = Rect.fromLTWH(scaledX, scaledY, scaledW, scaledH);
+
+      // Check if this face is recognized
       final detectionId = "${detection['box'][0]}_${detection['box'][1]}";
       final studentInfo = recognizedStudents[detectionId];
       final bool isRecognized =
           studentInfo != null && studentInfo['student_id'] != null;
 
-      // Draw the bounding box
+      // Draw the detection box
       canvas.drawRect(
         rect,
         isRecognized ? recognizedBoxPaint : unknownBoxPaint,
       );
 
-      // Draw a background for the text
-      if (studentInfo != null) {
-        final studentName = studentInfo['name'] ?? 'Unknown';
-        final confidence = studentInfo['confidence'] != null
-            ? (studentInfo['confidence'] * 100).toInt().toString() + '%'
-            : '';
-        final studentId = studentInfo['student_id'] ?? '';
+      // Draw name label if recognized
+      if (isRecognized) {
+        final textSpan = TextSpan(
+          text: " ${studentInfo!['name']} ",
+          style: textStyle,
+        );
+        final textPainter = TextPainter(
+          text: textSpan,
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout(minWidth: 0, maxWidth: 200);
 
-        final displayText =
-            isRecognized ? '$studentName ($studentId) $confidence' : 'Unknown';
-
-        final paragraphBuilder = ui.ParagraphBuilder(ui.ParagraphStyle(
-          textAlign: TextAlign.left,
-          maxLines: 2,
-          ellipsis: '...',
-        ))
-          ..pushStyle(ui.TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-          ))
-          ..addText(displayText);
-
-        final paragraph = paragraphBuilder.build()
-          ..layout(ui.ParagraphConstraints(width: w));
-
-        final textHeight = isRecognized ? 40.0 : 24.0;
-        final textRect = Rect.fromLTWH(x, y - textHeight, w, textHeight);
-        canvas.drawRect(textRect, backgroundPaint);
-        canvas.drawParagraph(paragraph, Offset(x + 5, y - textHeight + 4));
+        // Position the text above the box
+        textPainter.paint(
+          canvas,
+          Offset(scaledX, scaledY - textPainter.height - 5),
+        );
       }
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return true;
+  bool shouldRepaint(FaceDetectionPainter oldDelegate) {
+    return detections != oldDelegate.detections ||
+        recognizedStudents != oldDelegate.recognizedStudents;
   }
 }

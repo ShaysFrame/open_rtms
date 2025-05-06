@@ -5,12 +5,22 @@ import 'screens/home_screen.dart';
 import 'providers/face_detection_provider.dart';
 import 'providers/student_provider.dart';
 import 'services/camera_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 late List<CameraDescription> cameras;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   cameras = await availableCameras();
+
+  await Permission.camera.request();
+
+  // Add other permissions your app needs
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    debugPrint('💥 FLUTTER ERROR: ${details.exception}');
+    debugPrint(details.stack.toString());
+  };
 
   runApp(
     MultiProvider(
