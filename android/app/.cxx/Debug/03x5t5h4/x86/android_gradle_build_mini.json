@@ -1,0 +1,20 @@
+{
+  "buildFiles": [
+    "/Users/shay/development/flutter/packages/flutter_tools/gradle/src/main/groovy/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/Users/shay/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/Users/shay/Dev/Projects/project_open_rtms/open_rtms/android/app/.cxx/Debug/03x5t5h4/x86",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/Users/shay/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/Users/shay/Dev/Projects/project_open_rtms/open_rtms/android/app/.cxx/Debug/03x5t5h4/x86",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {}
+}

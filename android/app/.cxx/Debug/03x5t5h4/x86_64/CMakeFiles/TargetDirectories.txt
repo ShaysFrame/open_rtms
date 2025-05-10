@@ -1,0 +1,2 @@
+/Users/shay/Dev/Projects/project_open_rtms/open_rtms/android/app/.cxx/Debug/03x5t5h4/x86_64/CMakeFiles/edit_cache.dir
+/Users/shay/Dev/Projects/project_open_rtms/open_rtms/android/app/.cxx/Debug/03x5t5h4/x86_64/CMakeFiles/rebuild_cache.dir

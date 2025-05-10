@@ -1,19 +1,12 @@
 // example/lib/main.dart
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:ultralytics_yolo/yolo.dart';
 // YOLOResult is now imported through yolo.dart
 import 'package:ultralytics_yolo/yolo_view.dart';
 import 'package:image_picker/image_picker.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  var status = await Permission.camera.status;
-  if (status.isDenied) {
-    // We request the permission directly
-    await Permission.camera.request();
-  }
+void main() {
   runApp(const YoloExampleApp());
 }
 
@@ -125,12 +118,6 @@ class _CameraInferenceScreenState extends State<CameraInferenceScreen> {
   @override
   void initState() {
     super.initState();
-    debugPrint("Initializing YOLO View...");
-
-    // Try simplifying the YoloView first to debug
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      debugPrint("Post frame callback executed");
-    });
 
     // Set initial thresholds via controller
     // We do this in a post-frame callback to ensure the view is initialized
@@ -257,7 +244,7 @@ class _CameraInferenceScreenState extends State<CameraInferenceScreen> {
                 // Use GlobalKey or controller based on flag
                 key: _useController ? null : _yoloViewKey,
                 controller: _useController ? _yoloController : null,
-                modelPath: 'yolov8n_int8',
+                modelPath: 'face/yolov8n-face-lindevs_int8',
                 task: YOLOTask.detect,
                 onResult: _onDetectionResults,
               ),
@@ -289,7 +276,8 @@ class _SingleImageScreenState extends State<SingleImageScreen> {
   void initState() {
     super.initState();
     // Create the YOLO instance for single-image inference
-    _yolo = YOLO(modelPath: 'yolov8n_int8', task: YOLOTask.detect);
+    _yolo = YOLO(
+        modelPath: 'face/yolov8n-face-lindevs_int8', task: YOLOTask.detect);
 
     // Optionally load model ahead of time
     _yolo.loadModel();
@@ -302,17 +290,37 @@ class _SingleImageScreenState extends State<SingleImageScreen> {
     final bytes = await file.readAsBytes();
     final result = await _yolo.predict(bytes);
     setState(() {
-      // Check if boxes exist and set them as detections
+      // Check if boxes exist and process them
       if (result.containsKey('boxes') && result['boxes'] is List) {
-        _detections = List<Map<String, dynamic>>.from(result['boxes']);
+        // Get all detections but process them
+        List<Map<String, dynamic>> allDetections =
+            List<Map<String, dynamic>>.from(result['boxes']);
+
+        // Process each detection: relabel class as "face" and sort by confidence
+        _detections = allDetections.map((detection) {
+          // Create a new map with the same data but override the class information
+          return {
+            ...detection,
+            'class': 0, // Force class ID to 0
+            'className': 'face', // Force class name to "face"
+          };
+        }).toList();
+
+        // Sort by confidence (highest first)
+        _detections.sort((a, b) =>
+            (b['confidence'] as num).compareTo(a['confidence'] as num));
+
+        // Optional: Filter by minimum confidence if needed
+        // _detections = _detections.where((d) => (d['confidence'] as num) > 0.3).toList();
       } else {
         _detections = [];
       }
 
-      // Check if annotated image exists
+      // Handle annotated image
       if (result.containsKey('annotatedImage') &&
           result['annotatedImage'] is Uint8List) {
         _annotatedImage = result['annotatedImage'] as Uint8List;
+        // Note: The annotated image will still show the original labels
       } else {
         _annotatedImage = null;
       }
@@ -367,3 +375,31 @@ class _SingleImageScreenState extends State<SingleImageScreen> {
     );
   }
 }
+
+// import 'package:flutter/material.dart';
+// import 'package:open_rtms/features/home/ui/home_screen.dart';
+// import 'package:permission_handler/permission_handler.dart';
+
+// void main() async {
+//   WidgetsFlutterBinding.ensureInitialized();
+
+//   // Request camera permission
+//   await Permission.camera.request();
+
+//   runApp(const MyApp());
+// }
+
+// class MyApp extends StatelessWidget {
+//   const MyApp({super.key});
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return MaterialApp(
+//       title: 'Camera Permission App',
+//       theme: ThemeData(
+//         primarySwatch: Colors.blue,
+//       ),
+//       home: const HomeScreen(),
+//     );
+//   }
+// }

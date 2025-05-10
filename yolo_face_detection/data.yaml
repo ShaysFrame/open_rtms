@@ -1,0 +1,6 @@
+train: /Users/shay/Dev/Projects/project_open_rtms/open_rtms/yolo_face_detection/widerface/small/images
+val: /Users/shay/Dev/Projects/project_open_rtms/open_rtms/yolo_face_detection/widerface/small/images
+
+nc: 1  # Number of classes
+names:
+  0: face

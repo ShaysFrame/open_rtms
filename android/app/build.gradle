@@ -10,10 +10,6 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
-    aaptOptions {
-            noCompress 'tflite'
-            noCompress 'lite'
-    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
@@ -33,6 +29,20 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        externalNativeBuild {
+            cmake {
+                cppFlags ''
+            }
+        }
+    }
+
+    aaptOptions {
+        noCompress 'tflite'
+        noCompress 'lite'
+    }
+    
+    buildFeatures{
+        mlModelBinding true
     }
 
     buildTypes {
