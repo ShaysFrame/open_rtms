@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:provider/provider.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:open_rtms/providers/student_provider.dart';
 import 'package:open_rtms/services/camera_service.dart';
 
@@ -15,6 +16,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   late CameraController _cameraController;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _idController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
+
   bool _isInitialized = false;
   bool _isTakingPicture = false;
   bool _hasPicture = false;
@@ -60,6 +63,33 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error taking picture: $e')),
+      );
+    }
+  }
+
+  Future<void> _pickImageFromGallery() async {
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1200, // Limit image size for better performance
+        maxHeight: 1600,
+        imageQuality: 90,
+      );
+
+      if (pickedFile == null) return; // User canceled the picker
+
+      if (!mounted) return;
+
+      final studentProvider =
+          Provider.of<StudentProvider>(context, listen: false);
+      await studentProvider.setCurrentImage(pickedFile);
+
+      setState(() {
+        _hasPicture = true;
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error selecting image: $e')),
       );
     }
   }
@@ -179,16 +209,40 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
               },
             ),
             const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _hasPicture
-                  ? () => setState(() => _hasPicture = false)
-                  : (_isTakingPicture ? null : _takePicture),
-              icon: Icon(_hasPicture ? Icons.refresh : Icons.camera_alt),
-              label: Text(_hasPicture ? 'Retake Photo' : 'Take Photo'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
+            _hasPicture
+                ? ElevatedButton.icon(
+                    onPressed: () => setState(() => _hasPicture = false),
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retake Photo'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  )
+                : Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _isTakingPicture ? null : _takePicture,
+                          icon: const Icon(Icons.camera_alt),
+                          label: const Text('Take Photo'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _pickImageFromGallery,
+                          icon: const Icon(Icons.photo_library),
+                          label: const Text('Select Photo'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
             const SizedBox(height: 32),
             ElevatedButton(
               onPressed: _registerStudent,

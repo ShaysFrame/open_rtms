@@ -45,21 +45,70 @@ class FaceDetectionProvider with ChangeNotifier {
       _recognizedStudents;
 
   Future<void> loadModel() async {
-    if (_isModelLoaded) return;
+    // If model is already loaded, just verify it's working
+    if (_isModelLoaded) {
+      debugPrint("📱 YOLO model already loaded, verifying...");
+      try {
+        // Simple check by creating an empty image and running detection to verify model
+        final testImage = img.Image(width: 320, height: 240);
+        img.fill(testImage, color: img.ColorRgb8(255, 255, 255));
+        final testBytes = img.encodeJpg(testImage);
+
+        await _vision.yoloOnImage(
+          bytesList: testBytes,
+          imageHeight: testImage.height,
+          imageWidth: testImage.width,
+          iouThreshold: 0.4,
+          confThreshold: 0.5,
+          classThreshold: 0.5,
+        );
+
+        debugPrint("📱 YOLO model verification successful");
+        return;
+      } catch (e) {
+        // Model was loaded but seems corrupted or disconnected, reload it
+        debugPrint("📱 YOLO model verification failed, reloading: $e");
+        _isModelLoaded = false;
+      }
+    }
 
     try {
-      print("📱 Attempting to load YOLO model...");
-      await _vision.loadYoloModel(
-        labels: 'assets/models/labels.txt',
-        modelPath: 'assets/models/yolov8n-face-lindevs_float32.tflite',
-        modelVersion: "yolov8",
-        quantization: false,
-      );
+      debugPrint("📱 Attempting to load YOLO model...");
+
+      // First try to close any existing model to clear resources
+      try {
+        await _vision.closeYoloModel();
+        debugPrint("📱 Closed any existing YOLO model");
+      } catch (e) {
+        // Ignore errors from closing, it might not be loaded
+        debugPrint("📱 No existing model to close");
+      }
+
+      // Now load the model with a timeout
+      try {
+        await _vision
+            .loadYoloModel(
+          labels: 'assets/models/labels.txt',
+          modelPath: 'assets/models/yolov8n-face-lindevs_float32.tflite',
+          modelVersion: "yolov8",
+          quantization: false,
+        )
+            .timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            throw Exception("Model loading timed out after 10 seconds");
+          },
+        );
+      } catch (e) {
+        debugPrint("📱 Exception during model loading: $e");
+        rethrow;
+      }
+
       _isModelLoaded = true;
-      print("📱 YOLO model loaded successfully!");
+      debugPrint("📱 YOLO model loaded successfully!");
     } catch (e) {
-      print("📱 Error loading model: $e");
-      debugPrint('Error loading model: $e');
+      debugPrint("📱 Error loading model: $e");
+      _isModelLoaded = false;
       rethrow;
     }
   }
@@ -217,27 +266,36 @@ class FaceDetectionProvider with ChangeNotifier {
     try {
       // Check if file exists and has content
       if (!await faceImage.exists()) {
-        print("📱 Face image file doesn't exist");
-        return;
+        debugPrint("📱 Face image file doesn't exist");
+        throw Exception("Face image file not found");
       }
 
       final fileSize = await faceImage.length();
       if (fileSize < 100) {
-        print("📱 Face image too small: $fileSize bytes");
-        return;
+        debugPrint("📱 Face image too small: $fileSize bytes");
+        throw Exception("Face image too small: $fileSize bytes");
       }
 
-      print(
+      debugPrint(
           "📱 Sending face image for recognition: ${faceImage.path}, size: $fileSize bytes");
 
+      // Create multipart request
       final request = http.MultipartRequest('POST', Uri.parse(_backendUrl));
 
-      // Use 'image' as field name to match backend expectation
-      request.files
-          .add(await http.MultipartFile.fromPath('image', faceImage.path));
+      try {
+        // Use 'image' as field name to match backend expectation
+        request.files
+            .add(await http.MultipartFile.fromPath('image', faceImage.path));
+      } catch (e) {
+        debugPrint("📱 Error creating MultipartFile: $e");
+        throw Exception("Error preparing image for upload: $e");
+      }
 
       // Add device info as recognized_by
       request.fields['recognized_by'] = 'Flutter Mobile App';
+
+      // Add quality flag to tell backend this is potentially a high quality image
+      request.fields['high_quality'] = 'true';
 
       // Add already recognized student IDs to avoid duplicates
       // This tells backend which students are already recognized in this session
@@ -249,49 +307,106 @@ class FaceDetectionProvider with ChangeNotifier {
       // Add session ID to help backend group attendance records
       request.fields['session_id'] = _currentSessionId;
 
-      final response = await request.send();
-      final responseBody = await response.stream.bytesToString();
-      print("📱 API response: ${response.statusCode} - $responseBody");
+      // Send the request with timeout
+      http.StreamedResponse? response;
+      try {
+        // Use a timeout to avoid hanging if the backend is not responding
+        response = await request.send().timeout(const Duration(seconds: 30),
+            onTimeout: () {
+          throw Exception("Backend request timed out after 30 seconds");
+        });
+      } catch (e) {
+        debugPrint("📱 Error sending request to backend: $e");
+        throw Exception("Failed to contact face recognition service: $e");
+      }
 
+      // Process the response
+      String responseBody = "";
+      try {
+        responseBody = await response.stream.bytesToString();
+        debugPrint("📱 API response: ${response.statusCode} - $responseBody");
+      } catch (e) {
+        debugPrint("📱 Error reading response: $e");
+        throw Exception("Error reading server response");
+      }
+
+      // Handle successful response
       if (response.statusCode == 200) {
-        final data = jsonDecode(responseBody);
-        final results = data['results'] as List;
+        // Parse response
+        Map<String, dynamic> data;
+        try {
+          data = jsonDecode(responseBody);
+        } catch (e) {
+          debugPrint("📱 Error parsing JSON response: $e");
+          throw Exception("Invalid response format from server");
+        }
 
-        if (results.isNotEmpty) {
-          final firstResult = results[0];
-          final detectionId = "${detection['box'][0]}_${detection['box'][1]}";
+        // Process results
+        if (data.containsKey('results') && data['results'] is List) {
+          final results = data['results'] as List;
 
-          // Update _recognizeFace method to add this code after a successful recognition:
-          if (firstResult['student_id'] != null) {
-            // Student recognized
-            final studentId = firstResult['student_id'] as String;
+          if (results.isNotEmpty) {
+            // Get first result
+            final firstResult = results[0];
+            final detectionId = "${detection['box'][0]}_${detection['box'][1]}";
 
-            // Store in session tracking
-            recognizedStudentIdsThisSession.add(studentId);
+            if (firstResult.containsKey('student_id') &&
+                firstResult['student_id'] != null) {
+              // Student recognized
+              final studentId = firstResult['student_id'] as String;
+              final String studentName = firstResult['name'] ?? "Unknown Name";
 
-            _recognizedStudents[detectionId] = {
-              'name': firstResult['name'],
-              'student_id': studentId,
-              'confidence': 1.0 - (firstResult['distance'] ?? 0.0),
-              'timestamp': DateTime.now().toString(),
-            };
+              debugPrint(
+                  "📱 Student recognized: $studentName (ID: $studentId)");
+
+              // Store in session tracking
+              recognizedStudentIdsThisSession.add(studentId);
+
+              // Calculate confidence (distance is inversely proportional to confidence)
+              double confidence = 1.0;
+              if (firstResult.containsKey('distance')) {
+                confidence = 1.0 - (firstResult['distance'] ?? 0.0);
+                // Normalize confidence to 0.0-1.0 range
+                confidence = confidence.clamp(0.0, 1.0);
+
+                // Log confidence level
+                final confidencePercent = (confidence * 100).toStringAsFixed(1);
+                debugPrint("📱 Recognition confidence: $confidencePercent%");
+              }
+
+              _recognizedStudents[detectionId] = {
+                'name': studentName,
+                'student_id': studentId,
+                'confidence': confidence,
+                'timestamp': DateTime.now().toString(),
+              };
+            } else {
+              // Unknown face
+              debugPrint("📱 Face not recognized as any known student");
+              _recognizedStudents[detectionId] = {
+                'name': 'Unknown',
+                'student_id': null,
+                'confidence': 0.0,
+                'timestamp': DateTime.now().toString(),
+              };
+            }
+
+            // Update UI
+            notifyListeners();
           } else {
-            // Unknown face
-            _recognizedStudents[detectionId] = {
-              'name': 'Unknown',
-              'student_id': null,
-              'confidence': 0.0,
-              'timestamp': DateTime.now().toString(),
-            };
+            debugPrint("📱 No results returned from recognition API");
           }
-
-          notifyListeners();
+        } else {
+          debugPrint("📱 Invalid response format: missing 'results' array");
         }
       } else {
-        debugPrint('Backend error: ${response.statusCode} - $responseBody');
+        // Handle error response
+        debugPrint('📱 Backend error: ${response.statusCode} - $responseBody');
+        throw Exception("Backend returned error: ${response.statusCode}");
       }
     } catch (e) {
-      debugPrint('Error sending face to backend: $e');
+      debugPrint('📱 Error sending face to backend: $e');
+      throw Exception("Face recognition failed: $e");
     }
   }
 
@@ -313,12 +428,6 @@ class FaceDetectionProvider with ChangeNotifier {
       _detections = List<Map<String, dynamic>>.from(results);
       _totalFacesDetected = _detections.length;
 
-      // // Update total detected faces count
-      // _totalFacesDetected = _detections.length;
-      // _totalFacesRecognized = _recognizedStudents.values
-      //     .where((student) => student['student_id'] != null)
-      //     .length;
-
       notifyListeners();
 
       final now = DateTime.now();
@@ -331,53 +440,6 @@ class FaceDetectionProvider with ChangeNotifier {
       _lastApiCallTime = now;
 
       await sendFullImageForRecognition(image);
-
-      // if (_detections.isNotEmpty) {
-      //   // Sort by size (largest first) to prioritize closer/more prominent faces
-      //   _detections.sort((a, b) {
-      //     final aSize = (a['box'][2] as double) * (a['box'][3] as double);
-      //     final bSize = (b['box'][2] as double) * (b['box'][3] as double);
-      //     return bSize.compareTo(aSize);
-      //   });
-
-      // // Only process if we're not at the API rate limit
-      // if (now.difference(_lastApiCallTime) > _minApiCallInterval) {
-      //   // Find faces that haven't been processed recently and aren't currently being processed
-      //   final facesToProcess = _detections
-      //       .where((detection) {
-      //         final detectionId =
-      //             "${detection['box'][0]}_${detection['box'][1]}";
-
-      //         // Skip if this student was already recognized in this session
-      //         for (final entry in _recognizedStudents.entries) {
-      //           if (_isLikelySameStudent(detectionId, entry.key) &&
-      //               entry.value['student_id'] != null) {
-      //             return false; // Skip this face
-      //           }
-      //         }
-
-      //         return true; // Process this face
-      //       })
-      //       .take(maxFacesToProcess)
-      //       .toList();
-
-      //   if (facesToProcess.isNotEmpty) {
-      //     _lastApiCallTime = now; // Update API call timestamp
-
-      //     // Process each face asynchronously
-      //     for (final detection in facesToProcess) {
-      //       final detectionId =
-      //           "${detection['box'][0]}_${detection['box'][1]}";
-      //       facesInProcessing.add(detectionId);
-
-      //       // Process the face in the background
-      //       _processSingleFace(image, detection, detectionId).then((_) {
-      //         facesInProcessing.remove(detectionId);
-      //       });
-      //     }
-      //   }
-      // }
-      // }
     } catch (e) {
       debugPrint('Error processing image: $e');
     } finally {
@@ -599,20 +661,43 @@ class FaceDetectionProvider with ChangeNotifier {
   Future<File> _cropFaceFromImage(
       img.Image fullImage, Map<String, dynamic> detection) async {
     try {
-      final x = (detection['box'][0] as double).toInt();
-      final y = (detection['box'][1] as double).toInt();
-      final w = (detection['box'][2] as double).toInt();
-      final h = (detection['box'][3] as double).toInt();
+      debugPrint('📱 Cropping face with detection: $detection');
 
-      // Same padding as your existing method
-      final int paddingX = (w * 0.6).toInt();
-      final int paddingY = (h * 0.6).toInt();
+      // Safely extract box coordinates with type checking
+      List<dynamic> box = detection['box'];
+      if (box.length < 4) {
+        throw Exception("Invalid face detection box: $box");
+      }
+
+      // Convert values to int, handling any potential type issues
+      final x =
+          (box[0] is double ? box[0] : double.parse(box[0].toString())).toInt();
+      final y =
+          (box[1] is double ? box[1] : double.parse(box[1].toString())).toInt();
+      final w =
+          (box[2] is double ? box[2] : double.parse(box[2].toString())).toInt();
+      final h =
+          (box[3] is double ? box[3] : double.parse(box[3].toString())).toInt();
+
+      debugPrint('📱 Face coordinates: x=$x, y=$y, w=$w, h=$h');
+
+      // Validate dimensions
+      if (w <= 0 || h <= 0) {
+        throw Exception("Invalid face dimensions: width=$w, height=$h");
+      }
+
+      // Use smaller padding for better face crop quality
+      final int paddingX = (w * 0.3).toInt(); // Reduced from 0.6
+      final int paddingY = (h * 0.3).toInt(); // Reduced from 0.6
 
       // Make sure we don't go out of bounds
       final int safeX = max(0, x - paddingX);
       final int safeY = max(0, y - paddingY);
       final int safeW = min(fullImage.width - safeX, w + (paddingX * 2));
       final int safeH = min(fullImage.height - safeY, h + (paddingY * 2));
+
+      debugPrint(
+          '📱 Cropping area: x=$safeX, y=$safeY, w=$safeW, h=$safeH from image size ${fullImage.width}x${fullImage.height}');
 
       // Crop the face region with padding
       final faceImage = img.copyCrop(
@@ -623,16 +708,45 @@ class FaceDetectionProvider with ChangeNotifier {
         height: safeH,
       );
 
-      // Apply image enhancements just like in _cropAndSaveFace
+      debugPrint('📱 Initial crop successful');
+
+      // Simple checks to ensure the face crop was successful
+      if (faceImage.width < 10 || faceImage.height < 10) {
+        throw Exception(
+            "Face crop too small: ${faceImage.width}x${faceImage.height}");
+      }
+
+      // Apply image enhancements for better face recognition
       final enhancedImage = img.adjustColor(
         faceImage,
-        brightness: 1.2,
-        contrast: 1.3,
+        brightness: 1.1, // Slightly reduce brightness enhancement
+        contrast: 1.2, // Slightly reduce contrast enhancement
         saturation: 1.0,
       );
 
+      debugPrint('📱 Image enhancement applied');
+
+      // Standardize size for face recognition (keeping aspect ratio)
+      double aspectRatio = enhancedImage.width / enhancedImage.height;
+      int targetWidth, targetHeight;
+
+      if (aspectRatio > 1) {
+        // Wider than tall
+        targetWidth = 640;
+        targetHeight = (640 / aspectRatio).round();
+      } else {
+        // Taller than wide or square
+        targetHeight = 640;
+        targetWidth = (640 * aspectRatio).round();
+      }
+
       final resizedImage = img.copyResize(enhancedImage,
-          width: 640, height: 480, interpolation: img.Interpolation.cubic);
+          width: targetWidth,
+          height: targetHeight,
+          interpolation: img.Interpolation.cubic);
+
+      debugPrint(
+          '📱 Image resized to ${resizedImage.width}x${resizedImage.height}');
 
       // Save to file
       final directory = await getTemporaryDirectory();
@@ -640,21 +754,53 @@ class FaceDetectionProvider with ChangeNotifier {
       final path = '${directory.path}/face_$timestamp.jpg';
       final file = File(path);
 
-      await file.writeAsBytes(img.encodeJpg(resizedImage, quality: 100));
+      final jpegBytes = img.encodeJpg(resizedImage,
+          quality: 95); // Slightly reduced quality for better compression
+      await file.writeAsBytes(jpegBytes);
+
+      final fileSize = await file.length();
+      debugPrint('📱 Face image saved to ${file.path}, size: $fileSize bytes');
+
       return file;
     } catch (e) {
-      debugPrint('Error cropping face from full image: $e');
-      // Create a blank image in case of error
+      debugPrint('📱 Error cropping face from full image: $e');
+
+      // Create a placeholder image in case of error
+      // Using a larger placeholder to be more obvious that it's a fallback
       final directory = await getTemporaryDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final path = '${directory.path}/face_$timestamp.jpg';
+      final path = '${directory.path}/face_error_$timestamp.jpg';
       final file = File(path);
 
-      final blankImage = img.Image(width: 1, height: 1);
-      img.fill(blankImage, color: img.ColorRgb8(255, 255, 255));
-      await file.writeAsBytes(img.encodeJpg(blankImage));
+      // Create a red placeholder image to make it clear this is a fallback
+      final placeholderImage = img.Image(width: 320, height: 320);
+      img.fill(placeholderImage,
+          color: img.ColorRgb8(255, 200, 200)); // Light red
 
-      return file;
+      // Draw a face-like pattern
+      img.drawCircle(placeholderImage,
+          x: 160, y: 160, radius: 120, color: img.ColorRgb8(255, 150, 150));
+
+      // Create eyes
+      img.drawCircle(placeholderImage,
+          x: 120, y: 120, radius: 20, color: img.ColorRgb8(100, 100, 100));
+      img.drawCircle(placeholderImage,
+          x: 200, y: 120, radius: 20, color: img.ColorRgb8(100, 100, 100));
+
+      // Create mouth
+      img.drawLine(placeholderImage,
+          x1: 120,
+          y1: 200,
+          x2: 200,
+          y2: 200,
+          color: img.ColorRgb8(100, 100, 100),
+          thickness: 10);
+
+      await file.writeAsBytes(img.encodeJpg(placeholderImage));
+
+      debugPrint('📱 Created placeholder face image: ${file.path}');
+
+      throw Exception("Failed to crop face from image: $e");
     }
   }
 
@@ -729,6 +875,132 @@ class FaceDetectionProvider with ChangeNotifier {
     } catch (e) {
       print("📱 Error sending full image: $e");
       debugPrint('Error sending full image to backend: $e');
+    }
+  }
+
+  // Public method to process uploaded images
+  Future<void> processUploadedImage(File image) async {
+    if (!_isModelLoaded) {
+      debugPrint('📱 Model not loaded, loading now...');
+      await loadModel();
+      debugPrint('📱 Model loaded successfully');
+    }
+
+    try {
+      debugPrint('📱 Processing uploaded image: ${image.path}');
+
+      // Check if file exists and has content
+      if (!await image.exists()) {
+        throw Exception("Image file does not exist");
+      }
+
+      final fileSize = await image.length();
+      debugPrint('📱 Image file size: $fileSize bytes');
+
+      if (fileSize < 100) {
+        throw Exception("Image file too small or corrupted: $fileSize bytes");
+      }
+
+      // Load the image into memory
+      final Uint8List bytes = await image.readAsBytes();
+      debugPrint('📱 Read ${bytes.length} bytes from image file');
+
+      // Get image dimensions
+      final img.Image? decodedImage = img.decodeImage(bytes);
+      if (decodedImage == null) {
+        throw Exception("Failed to decode image - format may be unsupported");
+      }
+
+      debugPrint(
+          '📱 Decoded image dimensions: ${decodedImage.width}x${decodedImage.height}');
+
+      // Try with lower confidence thresholds for better detection
+      debugPrint('📱 Running YOLO face detection...');
+      final results = await _vision.yoloOnImage(
+        bytesList: bytes,
+        imageHeight: decodedImage.height,
+        imageWidth: decodedImage.width,
+        iouThreshold: 0.3, // Lower threshold to detect more potential faces
+        confThreshold: 0.4, // Lower threshold for face confidence
+        classThreshold: 0.4, // Lower threshold for class confidence
+      );
+
+      // Update detections
+      _detections = List<Map<String, dynamic>>.from(results);
+      _totalFacesDetected = _detections.length;
+      debugPrint('📱 Detection complete. Found ${_detections.length} faces');
+
+      // Log all detected faces
+      for (int i = 0; i < _detections.length; i++) {
+        final detection = _detections[i];
+        final box = detection['box'];
+        final confidence = detection['confidence'];
+        debugPrint('📱 Face $i: Box $box, Confidence $confidence');
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint('📱 Error processing uploaded image: $e');
+      _detections = []; // Clear any partial results to avoid confusion
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  // Public method for cropping faces from uploaded images
+  Future<File> cropFaceFromImage(
+      img.Image fullImage, Map<String, dynamic> detection) async {
+    debugPrint(
+        '📱 Cropping face from image with dimensions ${fullImage.width}x${fullImage.height}');
+
+    // Validate detection format and values
+    if (!detection.containsKey('box') ||
+        !(detection['box'] is List) ||
+        (detection['box'] as List).length < 4) {
+      debugPrint('📱 Invalid detection format: $detection');
+      throw Exception("Invalid detection format");
+    }
+
+    try {
+      return await _cropFaceFromImage(fullImage, detection);
+    } catch (e) {
+      debugPrint('📱 Error in cropFaceFromImage: $e');
+      rethrow;
+    }
+  }
+
+  // Public method for recognizing faces from uploaded images
+  Future<void> recognizeFaceFromImage(
+      File faceImage, Map<String, dynamic> detection) async {
+    debugPrint('📱 Recognizing face from image: ${faceImage.path}');
+
+    try {
+      // Validate the face image
+      if (!await faceImage.exists()) {
+        throw Exception("Face image file does not exist");
+      }
+
+      final fileSize = await faceImage.length();
+      debugPrint('📱 Face image file size: $fileSize bytes');
+
+      if (fileSize < 100) {
+        throw Exception("Face image too small or corrupted");
+      }
+
+      // Call the private recognition method
+      await _recognizeFace(faceImage, detection);
+
+      // Additional check to see if recognition succeeded
+      final detectionId = "${detection['box'][0]}_${detection['box'][1]}";
+      if (_recognizedStudents.containsKey(detectionId)) {
+        debugPrint(
+            '📱 Face recognition result: ${_recognizedStudents[detectionId]?['name']}');
+      } else {
+        debugPrint('📱 No recognition result for this face');
+      }
+    } catch (e) {
+      debugPrint('📱 Error in recognizeFaceFromImage: $e');
+      rethrow;
     }
   }
 }

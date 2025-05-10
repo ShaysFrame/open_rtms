@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:open_rtms/screens/recognition_screen.dart';
 import 'package:open_rtms/screens/registration_screen.dart';
+import 'package:open_rtms/screens/image_upload_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -61,6 +62,24 @@ class HomeScreen extends StatelessWidget {
               },
               icon: const Icon(Icons.person_add),
               label: const Text('Register New Student'),
+              style: OutlinedButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ImageUploadScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.upload_file),
+              label: const Text('Upload Image'),
               style: OutlinedButton.styleFrom(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 32, vertical: 16),

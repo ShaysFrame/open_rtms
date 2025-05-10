@@ -41,3 +41,5 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/yolo_face_detection/project_assets_bkp
+/yolo_face_detection/widerface
