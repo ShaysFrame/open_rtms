@@ -44,6 +44,22 @@ class FaceDetectionProvider with ChangeNotifier {
   Map<String, Map<String, dynamic>> get recognizedStudents =>
       _recognizedStudents;
 
+  // Method to update detections directly (used by ML Kit)
+  void updateDetections(List<Map<String, dynamic>> detections) {
+    _detections = detections;
+    _totalFacesDetected = detections.length;
+    notifyListeners();
+  }
+
+  // Method to add placeholder entries for ML Kit detected faces
+  void addPlaceholders(Map<String, Map<String, dynamic>> mlKitFaceIds) {
+    // Add placeholders to the recognizedStudents map
+    mlKitFaceIds.forEach((key, value) {
+      _recognizedStudents[key] = value;
+    });
+    notifyListeners();
+  }
+
   Future<void> loadModel() async {
     // If model is already loaded, just verify it's working
     if (_isModelLoaded) {
@@ -348,7 +364,12 @@ class FaceDetectionProvider with ChangeNotifier {
           if (results.isNotEmpty) {
             // Get first result
             final firstResult = results[0];
-            final detectionId = "${detection['box'][0]}_${detection['box'][1]}";
+            // Make sure the detection ID is consistent by using integer values
+            final double boxLeft = detection['box'][0];
+            final double boxTop = detection['box'][1];
+            final detectionId = "${boxLeft.toInt()}_${boxTop.toInt()}";
+            debugPrint(
+                "📱 Using detection ID for recognition result: $detectionId");
 
             if (firstResult.containsKey('student_id') &&
                 firstResult['student_id'] != null) {
@@ -914,34 +935,141 @@ class FaceDetectionProvider with ChangeNotifier {
       debugPrint(
           '📱 Decoded image dimensions: ${decodedImage.width}x${decodedImage.height}');
 
-      // Try with lower confidence thresholds for better detection
-      debugPrint('📱 Running YOLO face detection...');
-      final results = await _vision.yoloOnImage(
-        bytesList: bytes,
-        imageHeight: decodedImage.height,
-        imageWidth: decodedImage.width,
-        iouThreshold: 0.3, // Lower threshold to detect more potential faces
-        confThreshold: 0.4, // Lower threshold for face confidence
-        classThreshold: 0.4, // Lower threshold for class confidence
-      );
+      // No need to run YOLO face detection here since ML Kit has already detected faces
+      // We're keeping _detections populated from the updateDetections() method
 
-      // Update detections
-      _detections = List<Map<String, dynamic>>.from(results);
-      _totalFacesDetected = _detections.length;
-      debugPrint('📱 Detection complete. Found ${_detections.length} faces');
+      // Send the whole image directly to backend for recognition without cropping
+      debugPrint('📱 Sending whole image to backend for face recognition...');
 
-      // Log all detected faces
-      for (int i = 0; i < _detections.length; i++) {
-        final detection = _detections[i];
-        final box = detection['box'];
-        final confidence = detection['confidence'];
-        debugPrint('📱 Face $i: Box $box, Confidence $confidence');
+      try {
+        // Create multipart request
+        final request = http.MultipartRequest('POST', Uri.parse(_backendUrl));
+
+        // Add the full image (not cropped)
+        request.files
+            .add(await http.MultipartFile.fromPath('image', image.path));
+
+        // Add device info as recognized_by
+        request.fields['recognized_by'] = 'Flutter Mobile App - Full Image';
+
+        // Add quality flag to tell backend this is a high quality image
+        request.fields['high_quality'] = 'true';
+
+        // Add already recognized student IDs to avoid duplicates
+        if (recognizedStudentIdsThisSession.isNotEmpty) {
+          request.fields['already_recognized'] =
+              recognizedStudentIdsThisSession.join(',');
+        }
+
+        // Add session ID to help backend group attendance records
+        request.fields['session_id'] = _currentSessionId;
+
+        // Send the request with timeout
+        final response = await request
+            .send()
+            .timeout(const Duration(seconds: 30), onTimeout: () {
+          throw Exception("Backend request timed out after 30 seconds");
+        });
+
+        // Process the response
+        final responseBody = await response.stream.bytesToString();
+        debugPrint("📱 API response: ${response.statusCode} - $responseBody");
+
+        if (response.statusCode == 200) {
+          // Parse response
+          final data = jsonDecode(responseBody);
+
+          if (data.containsKey('results') && data['results'] is List) {
+            final results = data['results'] as List;
+            debugPrint(
+                "📱 Got ${results.length} recognition results from backend");
+
+            // Map the backend results to the ML Kit faces
+            if (results.isNotEmpty && _detections.isNotEmpty) {
+              // For each detected face from ML Kit, try to match with a backend result
+              for (int i = 0; i < _detections.length; i++) {
+                final detection = _detections[i];
+                final boxLeft = detection['box'][0];
+                final boxTop = detection['box'][1];
+                final detectionId = "${boxLeft.toInt()}_${boxTop.toInt()}";
+
+                // The backend may return results in any order, so find the best match
+                // This is simplified logic - in reality you might want to map based on face position
+                if (i < results.length) {
+                  final result = results[i];
+
+                  if (result.containsKey('student_id') &&
+                      result['student_id'] != null) {
+                    // Student recognized
+                    final studentId = result['student_id'] as String;
+                    final String studentName = result['name'] ?? "Unknown Name";
+
+                    debugPrint(
+                        "📱 Mapping recognized student $studentName to face ID: $detectionId");
+
+                    // Store in session tracking
+                    recognizedStudentIdsThisSession.add(studentId);
+
+                    // Calculate confidence
+                    double confidence = 1.0;
+                    if (result.containsKey('distance')) {
+                      confidence = 1.0 - (result['distance'] ?? 0.0);
+                      confidence = confidence.clamp(0.0, 1.0);
+                    }
+
+                    // Update the recognizedStudents map
+                    _recognizedStudents[detectionId] = {
+                      'name': studentName,
+                      'student_id': studentId,
+                      'confidence': confidence,
+                      'timestamp': DateTime.now().toString(),
+                    };
+                  } else {
+                    // Unknown face from backend
+                    debugPrint(
+                        "📱 Face $i not recognized by backend, marking as Unknown");
+                    _recognizedStudents[detectionId] = {
+                      'name': 'Unknown',
+                      'student_id': null,
+                      'confidence': 0.0,
+                      'timestamp': DateTime.now().toString(),
+                    };
+                  }
+                } else {
+                  // More faces detected by ML Kit than recognized by backend
+                  debugPrint(
+                      "📱 No matching backend result for face ID: $detectionId");
+                  _recognizedStudents[detectionId] = {
+                    'name': 'Unknown',
+                    'student_id': null,
+                    'confidence': 0.0,
+                    'timestamp': DateTime.now().toString(),
+                  };
+                }
+              }
+            }
+
+            // Update recognition count
+            _totalFacesRecognized = _recognizedStudents.values
+                .where((student) => student['student_id'] != null)
+                .length;
+
+            // Update UI
+            notifyListeners();
+          }
+        } else {
+          // Handle error response
+          debugPrint(
+              '📱 Backend error: ${response.statusCode} - $responseBody');
+          throw Exception("Backend returned error: ${response.statusCode}");
+        }
+      } catch (e) {
+        debugPrint('📱 Error in backend communication: $e');
+        throw Exception("Face recognition backend error: $e");
       }
-
-      notifyListeners();
     } catch (e) {
       debugPrint('📱 Error processing uploaded image: $e');
-      _detections = []; // Clear any partial results to avoid confusion
+      // Don't clear _detections here - we want to keep the ML Kit detections
       notifyListeners();
       rethrow;
     }
@@ -987,11 +1115,25 @@ class FaceDetectionProvider with ChangeNotifier {
         throw Exception("Face image too small or corrupted");
       }
 
+      // Generate detection ID from box - ensuring integer values are used
+      final double boxLeft = detection['box'][0];
+      final double boxTop = detection['box'][1];
+      final String detectionId = "${boxLeft.toInt()}_${boxTop.toInt()}";
+      debugPrint('📱 Detection ID for recognition: $detectionId');
+
+      // Set a marker in the recognized students map before sending to the backend
+      _recognizedStudents[detectionId] = {
+        'name': 'Processing...',
+        'student_id': null,
+        'confidence': 0.0,
+        'timestamp': DateTime.now().toString(),
+      };
+      notifyListeners();
+
       // Call the private recognition method
       await _recognizeFace(faceImage, detection);
 
       // Additional check to see if recognition succeeded
-      final detectionId = "${detection['box'][0]}_${detection['box'][1]}";
       if (_recognizedStudents.containsKey(detectionId)) {
         debugPrint(
             '📱 Face recognition result: ${_recognizedStudents[detectionId]?['name']}');
