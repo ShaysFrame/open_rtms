@@ -12,34 +12,34 @@ class HomeScreen extends StatelessWidget {
 
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: Colors.grey),
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Menu coming soon'),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          },
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.grey),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Settings coming soon'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-        ],
-      ),
+      // appBar: AppBar(
+      //   backgroundColor: Colors.transparent,
+      //   elevation: 0,
+      //   leading: IconButton(
+      //     icon: const Icon(Icons.menu, color: Colors.grey),
+      //     onPressed: () {
+      //       ScaffoldMessenger.of(context).showSnackBar(
+      //         const SnackBar(
+      //           content: Text('Menu coming soon'),
+      //           behavior: SnackBarBehavior.floating,
+      //         ),
+      //       );
+      //     },
+      //   ),
+      //   actions: [
+      //     IconButton(
+      //       icon: const Icon(Icons.settings, color: Colors.grey),
+      //       onPressed: () {
+      //         ScaffoldMessenger.of(context).showSnackBar(
+      //           const SnackBar(
+      //             content: Text('Settings coming soon'),
+      //             behavior: SnackBarBehavior.floating,
+      //           ),
+      //         );
+      //       },
+      //     ),
+      //   ],
+      // ),
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(

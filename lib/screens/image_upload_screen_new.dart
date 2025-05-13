@@ -471,7 +471,7 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
                                                     BorderRadius.circular(4),
                                               ),
                                               child: const Text(
-                                                'ML Kit Detection',
+                                                '',
                                                 style: TextStyle(
                                                   color: Colors.white,
                                                   fontSize: 12,
@@ -582,9 +582,8 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
                           ),
                         )
                       : const Icon(Icons.face),
-                  label: Text(_isProcessing
-                      ? 'Processing...'
-                      : 'Detect Faces with ML Kit'),
+                  label:
+                      Text(_isProcessing ? 'Processing...' : 'Take Attendance'),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 24, vertical: 12),
