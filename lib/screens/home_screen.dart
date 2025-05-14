@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:open_rtms/screens/analytics_screen.dart';
 import 'package:open_rtms/screens/image_upload_screen.dart';
 import 'package:open_rtms/screens/recognition_screen.dart';
 import 'package:open_rtms/screens/registration_screen.dart';
@@ -109,13 +110,14 @@ class HomeScreen extends StatelessWidget {
                   _buildFeatureCard(
                     context,
                     icon: Icons.camera_alt,
-                    title: 'Take Attendance',
+                    title: 'Live Attendance',
                     description: 'Recognize students and record attendance',
                     color: Colors.blue.shade600,
                     onTap: () {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
+                          // builder: (context) => const LiveAttendanceScreen(),
                           builder: (context) => const RecognitionScreen(),
                         ),
                       );
@@ -164,10 +166,10 @@ class HomeScreen extends StatelessWidget {
                           title: 'Analytics',
                           color: Colors.purple.shade600,
                           onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Analytics feature coming soon!'),
-                                behavior: SnackBarBehavior.floating,
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const AnalyticsScreen(),
                               ),
                             );
                           },

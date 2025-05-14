@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:lottie/lottie.dart';
+import 'package:open_rtms/providers/person_detection_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:open_rtms/providers/face_detection_provider.dart';
+import 'package:open_rtms/providers/attendance_provider.dart';
+import 'package:open_rtms/screens/analytics_screen.dart';
 import 'package:open_rtms/widgets/face_detection_overlay.dart';
 import 'package:open_rtms/services/camera_service.dart';
 import 'dart:typed_data';
@@ -27,7 +31,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     final cameraService = Provider.of<CameraService>(context, listen: false);
-    _initCamera(cameraService);
+    _initRecognition(cameraService);
   }
 
   @override
@@ -38,12 +42,12 @@ class _RecognitionScreenState extends State<RecognitionScreen>
       if (_cameraController.value.isInitialized) {
         final cameraService =
             Provider.of<CameraService>(context, listen: false);
-        _initCamera(cameraService);
+        _initRecognition(cameraService);
       }
     }
   }
 
-  Future<void> _initCamera(CameraService cameraService) async {
+  Future<void> _initRecognition(CameraService cameraService) async {
     setState(() {
       _isInitialized = false;
     });
@@ -61,9 +65,12 @@ class _RecognitionScreenState extends State<RecognitionScreen>
       });
 
       final detectionProvider =
-          Provider.of<FaceDetectionProvider>(context, listen: false);
-      await detectionProvider.loadModel();
+          Provider.of<PersonDetectionProvider>(context, listen: false);
+      final attendanceProvider =
+          Provider.of<AttendanceProvider>(context, listen: false);
 
+      await detectionProvider.loadModel();
+      attendanceProvider.startNewSession();
       await _cameraController.startImageStream((image) {
         if (!_isProcessing) {
           _isProcessing = true;
@@ -114,7 +121,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
 
     // Reinitialize camera
     final cameraService = Provider.of<CameraService>(context, listen: false);
-    await _initCamera(cameraService);
+    await _initRecognition(cameraService);
   }
 
   Future<void> _toggleRecognition() async {
@@ -123,7 +130,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     });
 
     final detectionProvider =
-        Provider.of<FaceDetectionProvider>(context, listen: false);
+        Provider.of<PersonDetectionProvider>(context, listen: false);
 
     if (_recognitionActive) {
       // Resume processing
@@ -201,35 +208,52 @@ class _RecognitionScreenState extends State<RecognitionScreen>
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         actions: [
-          Consumer<FaceDetectionProvider>(
+          Consumer<AttendanceProvider>(
             builder: (context, provider, child) {
               final presentStudents = provider.recognizedStudents.values
                   .where((student) => student['student_id'] != null)
                   .toList();
 
-              return Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                margin: const EdgeInsets.only(right: 16),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.green.withOpacity(0.5)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.people, color: Colors.green),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${presentStudents.length}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
+              return Row(
+                children: [
+                  if (presentStudents.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.assessment, color: Colors.white70),
+                      tooltip: 'View Analytics',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const AnalyticsScreen(),
+                          ),
+                        );
+                      },
                     ),
-                  ],
-                ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    margin: const EdgeInsets.only(right: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.green.withOpacity(0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.people, color: Colors.green),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${presentStudents.length}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               );
             },
           ),
@@ -279,39 +303,35 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                             ),
 
                             // Overlay for face detection with improved parameters
-                            Consumer<FaceDetectionProvider>(
-                              builder: (context, provider, child) {
-                                // Debug information about detections
-                                if (provider.detections.isNotEmpty) {
-                                  print(
-                                      "📱 Detections found: ${provider.detections.length}");
-                                  print(
-                                      "📱 First detection: ${provider.detections.first}");
-                                }
-
-                                // Create a fixed size for the container
-                                final containerWidth =
-                                    MediaQuery.of(context).size.width -
-                                        32; // Full width minus margins
-                                final containerHeight = containerWidth *
-                                    (4 / 3); // Using 3:4 aspect ratio
-
-                                // Camera image size
-                                final cameraSize =
-                                    _cameraController.value.previewSize!;
-
-                                return FaceDetectionOverlay(
-                                  detections: provider.detections,
-                                  recognizedStudents:
-                                      provider.recognizedStudents,
-                                  // Use the actual camera dimensions (not swapped)
-                                  previewSize:
-                                      Size(cameraSize.width, cameraSize.height),
-                                  // Use the container dimensions for screen size
-                                  screenSize:
-                                      Size(containerWidth, containerHeight),
-                                );
-                              },
+                            Center(
+                              child: SizedBox(
+                                // width: 150,
+                                // height: 150,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    // Add a Lottie animation for scanning effect
+                                    Lottie.asset(
+                                      'assets/animations/scanning.json',
+                                      repeat: true,
+                                      fit: BoxFit.contain,
+                                    ),
+                                    // Add a circular border to simulate a scanning area
+                                    Container(
+                                      width: MediaQuery.of(context).size.width,
+                                      height:
+                                          MediaQuery.of(context).size.height,
+                                      decoration: BoxDecoration(
+                                        // shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.green.withOpacity(0.8),
+                                          width: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
 
                             // Optional gradient overlay for better visibility
@@ -340,7 +360,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                 Positioned(
                   bottom: 24,
                   right: 24,
-                  child: Consumer<FaceDetectionProvider>(
+                  child: Consumer<PersonDetectionProvider>(
                     builder: (context, provider, child) {
                       return FloatingActionButton.extended(
                         heroTag: 'scanClassroomFab',
@@ -404,7 +424,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                     top: 0,
                     left: 0,
                     right: 0,
-                    child: Consumer<FaceDetectionProvider>(
+                    child: Consumer<PersonDetectionProvider>(
                       builder: (context, provider, child) {
                         // Only show when faces are detected
                         if (provider.totalFacesDetected == 0)
@@ -495,7 +515,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
           ),
 
           // Attendance summary panel
-          Consumer<FaceDetectionProvider>(
+          Consumer<AttendanceProvider>(
             builder: (context, provider, child) {
               final presentStudents = provider.recognizedStudents.values
                   .where((student) => student['student_id'] != null)
@@ -535,7 +555,10 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                             icon: const Icon(Icons.refresh,
                                 color: Colors.white70),
                             onPressed: () {
-                              provider.resetAttendance();
+                              // Get the central attendance provider and reset it
+                              Provider.of<AttendanceProvider>(context,
+                                      listen: false)
+                                  .resetAttendance();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text('Attendance data reset'),

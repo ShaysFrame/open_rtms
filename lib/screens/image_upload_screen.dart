@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:open_rtms/providers/face_detection_provider.dart';
+import 'package:open_rtms/providers/attendance_provider.dart';
+import 'package:open_rtms/screens/analytics_screen.dart';
 import 'package:open_rtms/widgets/face_detection_overlay.dart';
 import 'package:image/image.dart' as img;
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -43,6 +45,15 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
     super.initState();
     // Initialize the face detector
     _faceDetector = FaceDetector(options: _faceDetectorOptions);
+
+    // Get the attendance provider and start a new session
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final attendanceProvider =
+          Provider.of<AttendanceProvider>(context, listen: false);
+      attendanceProvider.startNewSession(
+          name: 'Image Upload ${DateTime.now().toString()}');
+      debugPrint('📱 Started a new attendance session in Image Upload Screen');
+    });
   }
 
   @override
@@ -119,6 +130,12 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
     setState(() {
       _isProcessing = true;
     });
+
+    // Start a new session in the attendance provider
+    final attendanceProvider =
+        Provider.of<AttendanceProvider>(context, listen: false);
+    attendanceProvider.startNewSession(
+        name: 'Photo Upload ${DateTime.now().toString().substring(0, 16)}');
 
     try {
       // Get the face detection provider
@@ -363,34 +380,51 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
         title: const Text('Upload Image'),
         elevation: 0,
         actions: [
-          Consumer<FaceDetectionProvider>(
+          Consumer<AttendanceProvider>(
             builder: (context, provider, child) {
               final presentStudents = provider.recognizedStudents.values
                   .where((student) => student['student_id'] != null)
                   .toList();
 
-              return Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                margin: const EdgeInsets.only(right: 16),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.green.withOpacity(0.5)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.people, color: Colors.green),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${presentStudents.length}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+              return Row(
+                children: [
+                  if (presentStudents.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.assessment),
+                      tooltip: 'View Analytics',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const AnalyticsScreen(),
+                          ),
+                        );
+                      },
                     ),
-                  ],
-                ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    margin: const EdgeInsets.only(right: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.green.withOpacity(0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.people, color: Colors.green),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${presentStudents.length}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               );
             },
           ),
@@ -597,7 +631,7 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
           ),
 
           // Attendance summary panel
-          Consumer<FaceDetectionProvider>(
+          Consumer<AttendanceProvider>(
             builder: (context, provider, child) {
               final presentStudents = provider.recognizedStudents.values
                   .where((student) => student['student_id'] != null)
@@ -635,7 +669,10 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
                           IconButton(
                             icon: const Icon(Icons.refresh),
                             onPressed: () {
-                              provider.resetAttendance();
+                              // Get the centralized attendance provider
+                              Provider.of<AttendanceProvider>(context,
+                                      listen: false)
+                                  .resetAttendance();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text('Attendance data reset'),
