@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:open_rtms/screens/image_upload_screen_new.dart';
+import 'package:open_rtms/screens/image_upload_screen.dart';
 import 'package:open_rtms/screens/recognition_screen.dart';
 import 'package:open_rtms/screens/registration_screen.dart';
 
