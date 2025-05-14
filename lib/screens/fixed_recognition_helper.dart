@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'dart:typed_data'; // <-- ADDED THIS IMPORT
 
 // This is a helper class with the fixed ML Kit face detection implementations
 class MLKitHelper {
@@ -68,19 +69,89 @@ class MLKitHelper {
       debugPrint(
           "📱 Created metadata: rotation=${metadata.rotation.rawValue}, format=${metadata.format.rawValue}");
 
-      // Use the Y plane (first plane) as that contains most of the image data
-      final bytes = cameraImage.planes[0].bytes;
-      debugPrint("📱 Using Y plane with ${bytes.length} bytes");
-      debugPrint(
-          "📱 IMAGE CONVERSION END -----------------------------------------");
+      // For YUV_420_888, concatenate Y, U, and V planes
+      // The U and V planes might have different byte strides and pixel strides.
+      if (metadata.format == InputImageFormat.yuv_420_888 ||
+          metadata.format == InputImageFormat.nv21) {
+        // NV21 is also YUV420
+        // Ensure we have three planes for YUV420
+        if (cameraImage.planes.length == 3) {
+          final yPlane = cameraImage.planes[0];
+          final uPlane = cameraImage.planes[1];
+          final vPlane = cameraImage.planes[2];
 
-      // Create and return the input image with bytes and metadata
-      return InputImage.fromBytes(
-        bytes: bytes,
-        metadata: metadata,
-      );
-    } catch (e) {
-      debugPrint("📱 ERROR converting camera image: $e");
+          final yBuffer = yPlane.bytes;
+          final uBuffer = uPlane.bytes;
+          final vBuffer = vPlane.bytes;
+
+          // The U and V planes are interleaved in some formats (like NV21) or separate.
+          // For ML Kit, it expects them concatenated if they are separate.
+          // We need to respect bytesPerRow and pixelStride for U and V planes if they are not full width.
+
+          // A common way to handle YUV420 is to concatenate them directly
+          // if they are already in the correct planar format.
+          // However, pixel and row strides can make this tricky.
+          // For now, let's try a direct concatenation, assuming planes are correctly ordered.
+          // If issues persist, a more robust plane reconstruction might be needed.
+
+          // Concatenate all plane bytes.
+          // This assumes that the planes are already in the correct order (Y, then U, then V or Y, then UV interleaved).
+          // For InputImageFormat.yuv_420_888, it expects separate Y, U, V planes concatenated.
+          // For InputImageFormat.nv21, it expects Y plane followed by interleaved VU plane.
+          // The camera plugin with ImageFormatGroup.yuv420 usually provides kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+          // on iOS (NV12) or YUV_420_888 on Android.
+
+          // Let's try a simpler concatenation first, assuming the planes are in Y, U, V order
+          // and MLKit handles the strides internally based on metadata.
+          // The `bytes` parameter for `InputImage.fromBytes` should be a single byte array.
+
+          final allBytes = BytesBuilder();
+          allBytes.add(yBuffer);
+          allBytes.add(uBuffer);
+          allBytes.add(vBuffer);
+          final bytes = allBytes.toBytes();
+
+          debugPrint(
+              "📱 Using YUV420 format. Concatenated Y (${yBuffer.length}), U (${uBuffer.length}), V (${vBuffer.length}) planes. Total: ${bytes.length} bytes");
+          debugPrint(
+              "📱 IMAGE CONVERSION END -----------------------------------------");
+
+          return InputImage.fromBytes(
+            bytes: bytes,
+            metadata: metadata,
+          );
+        } else {
+          debugPrint(
+              "📱 ERROR: Expected 3 planes for YUV420 format, but got ${cameraImage.planes.length}. Falling back to Y plane only.");
+          // Fallback to Y plane if plane count is not 3, though this is likely to fail.
+          final bytes = cameraImage.planes[0].bytes;
+          debugPrint(
+              "📱 Using Y plane with ${bytes.length} bytes (fallback due to incorrect plane count)");
+          debugPrint(
+              "📱 IMAGE CONVERSION END -----------------------------------------");
+          return InputImage.fromBytes(
+            bytes: bytes,
+            metadata: metadata,
+          );
+        }
+      } else {
+        // For other formats (like BGRA8888, which might be used on iOS if not YUV)
+        // or if we are unsure, use the first plane. This was the previous behavior.
+        final bytes = cameraImage.planes[0].bytes;
+        debugPrint(
+            "📱 Using non-YUV420 format (${metadata.format.rawValue}). Using first plane with ${bytes.length} bytes");
+        debugPrint(
+            "📱 IMAGE CONVERSION END -----------------------------------------");
+
+        return InputImage.fromBytes(
+          bytes: bytes,
+          metadata: metadata,
+        );
+      }
+    } catch (e, s) {
+      // Added stack trace
+      debugPrint(
+          "📱 ERROR converting camera image: $e\n$s"); // Added stack trace
       return null;
     }
   }

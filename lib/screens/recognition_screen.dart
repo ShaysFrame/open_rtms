@@ -23,6 +23,11 @@ class _RecognitionScreenState extends State<RecognitionScreen>
   CameraLensDirection _currentDirection = CameraLensDirection.back;
   bool _recognitionActive = true; // Start with recognition active
 
+  // Zoom level state
+  double _currentZoomLevel = 1.0;
+  double _minZoomLevel = 1.0;
+  double _maxZoomLevel = 1.0;
+
   // Add ML Kit Face Detector
   late FaceDetector _faceDetector;
 
@@ -68,6 +73,13 @@ class _RecognitionScreenState extends State<RecognitionScreen>
       );
 
       if (!mounted) return;
+
+      // Get min and max zoom levels after camera is initialized
+      _minZoomLevel = await _cameraController.getMinZoomLevel();
+      _maxZoomLevel = await _cameraController.getMaxZoomLevel();
+      // Set current zoom to min initially or ensure it's within bounds
+      _currentZoomLevel = _minZoomLevel;
+      await _cameraController.setZoomLevel(_currentZoomLevel);
 
       setState(() {
         _isInitialized = true;
@@ -493,6 +505,42 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                     ),
                   ),
                 ),
+
+                // Zoom Slider
+                if (_isInitialized && _maxZoomLevel > _minZoomLevel)
+                  Positioned(
+                    bottom: 90, // Adjust position as needed
+                    left: 24,
+                    right: 24,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(20.0),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.zoom_out, color: Colors.white),
+                          Expanded(
+                            child: Slider(
+                              value: _currentZoomLevel,
+                              min: _minZoomLevel,
+                              max: _maxZoomLevel,
+                              activeColor: Colors.white,
+                              inactiveColor: Colors.white30,
+                              onChanged: (value) async {
+                                setState(() {
+                                  _currentZoomLevel = value;
+                                });
+                                await _cameraController.setZoomLevel(value);
+                              },
+                            ),
+                          ),
+                          const Icon(Icons.zoom_in, color: Colors.white),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -687,75 +735,86 @@ class _RecognitionScreenState extends State<RecognitionScreen>
           image, _cameraController.description);
 
       if (inputImage == null) {
-        debugPrint("📱 Failed to convert camera image to ML Kit format");
+        debugPrint("🚦 Input image is null, skipping processing.");
         _isProcessing = false;
         return;
       }
 
-      // Detect faces with ML Kit
-      final faces = await _faceDetector.processImage(inputImage);
-      debugPrint("📱 ML Kit detected ${faces.length} faces");
+      debugPrint("🚦 Processing image with ML Kit Face Detector...");
+      try {
+        final List<Face> faces = await _faceDetector.processImage(inputImage);
+        debugPrint(
+            "🚦 ML Kit detected ${faces.length} faces."); // <-- ADDED THIS LINE
 
-      if (faces.isEmpty) {
+        if (faces.isNotEmpty) {
+          debugPrint("🚦 Detected face details:");
+        }
+
+        if (faces.isEmpty) {
+          _isProcessing = false;
+          return;
+        }
+
+        // We just need to convert faces to detections for the provider
+        // No need to store the ML Kit faces separately
+
+        // Get detection provider
+        final detectionProvider =
+            Provider.of<FaceDetectionProvider>(context, listen: false);
+
+        // Convert ML Kit faces to provider format
+        List<Map<String, dynamic>> detections = [];
+        Map<String, Map<String, dynamic>> mlKitFaceIds = {};
+
+        for (final face in faces) {
+          // Convert ML Kit face to provider format
+          final detection = MLKitHelper.mlKitToProviderFormat(face);
+
+          if (detection.isEmpty) continue; // Skip invalid faces
+
+          // Add to detections list
+          detections.add(detection);
+
+          // Create unique face ID
+          final faceId = MLKitHelper.createFaceId(face);
+
+          // Create placeholder entries for faces without recognition data
+          if (!detectionProvider.recognizedStudents.containsKey(faceId) ||
+              detectionProvider.recognizedStudents[faceId]?['student_id'] ==
+                  null) {
+            mlKitFaceIds[faceId] = {
+              'name': 'Detecting...',
+              'student_id': null,
+              'confidence': 0.0,
+              'timestamp': DateTime.now().toString(),
+            };
+          }
+        }
+
+        // Update provider with detections
+        if (detections.isNotEmpty) {
+          detectionProvider.updateDetections(detections);
+
+          if (mlKitFaceIds.isNotEmpty) {
+            detectionProvider.addPlaceholders(mlKitFaceIds);
+          }
+
+          // Process with backend
+          try {
+            await detectionProvider.processCameraImage(image);
+          } catch (e) {
+            debugPrint("📱 Error processing with backend: $e");
+          }
+        }
+
+        // Update UI if needed
+        if (mounted && faces.isNotEmpty) {
+          setState(() {});
+        }
+      } catch (e) {
+        debugPrint("📱 Error in ML Kit face detection: $e");
+      } finally {
         _isProcessing = false;
-        return;
-      }
-
-      // We just need to convert faces to detections for the provider
-      // No need to store the ML Kit faces separately
-
-      // Get detection provider
-      final detectionProvider =
-          Provider.of<FaceDetectionProvider>(context, listen: false);
-
-      // Convert ML Kit faces to provider format
-      List<Map<String, dynamic>> detections = [];
-      Map<String, Map<String, dynamic>> mlKitFaceIds = {};
-
-      for (final face in faces) {
-        // Convert ML Kit face to provider format
-        final detection = MLKitHelper.mlKitToProviderFormat(face);
-
-        if (detection.isEmpty) continue; // Skip invalid faces
-
-        // Add to detections list
-        detections.add(detection);
-
-        // Create unique face ID
-        final faceId = MLKitHelper.createFaceId(face);
-
-        // Create placeholder entries for faces without recognition data
-        if (!detectionProvider.recognizedStudents.containsKey(faceId) ||
-            detectionProvider.recognizedStudents[faceId]?['student_id'] ==
-                null) {
-          mlKitFaceIds[faceId] = {
-            'name': 'Detecting...',
-            'student_id': null,
-            'confidence': 0.0,
-            'timestamp': DateTime.now().toString(),
-          };
-        }
-      }
-
-      // Update provider with detections
-      if (detections.isNotEmpty) {
-        detectionProvider.updateDetections(detections);
-
-        if (mlKitFaceIds.isNotEmpty) {
-          detectionProvider.addPlaceholders(mlKitFaceIds);
-        }
-
-        // Process with backend
-        try {
-          await detectionProvider.processCameraImage(image);
-        } catch (e) {
-          debugPrint("📱 Error processing with backend: $e");
-        }
-      }
-
-      // Update UI if needed
-      if (mounted && faces.isNotEmpty) {
-        setState(() {});
       }
     } catch (e) {
       debugPrint("📱 Error in ML Kit face detection: $e");
