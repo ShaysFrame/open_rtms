@@ -51,11 +51,11 @@ class MLKitFacePainter extends CustomPainter {
 
     // Draw the image on the canvas if available
     if (uiImage != null) {
-      print(
+      debugPrint(
           "📱 Drawing UI Image on canvas: ${imageSize.width}x${imageSize.height}");
-      print(
+      debugPrint(
           "📱 Display size: ${displayedImageSize.width}x${displayedImageSize.height}");
-      print("📱 Drawing at offset: ($offsetX, $offsetY)");
+      debugPrint("📱 Drawing at offset: ($offsetX, $offsetY)");
 
       final paint = Paint();
       final src = Rect.fromLTWH(0, 0, imageSize.width, imageSize.height);
@@ -64,9 +64,9 @@ class MLKitFacePainter extends CustomPainter {
       canvas.drawImageRect(uiImage!, src, dst, paint);
     }
 
-    print(
+    debugPrint(
         "📱 ML Kit Painter - Image size: ${imageSize.width}x${imageSize.height}, Display size: ${size.width}x${size.height}");
-    print(
+    debugPrint(
         "📱 ML Kit Painter - Scale factors: X=$scaleX, Y=$scaleY, Offsets: X=$offsetX, Y=$offsetY");
 
     // If we don't have any faces to draw, we're done after drawing the image
@@ -105,7 +105,7 @@ class MLKitFacePainter extends CustomPainter {
       final String faceId = "${faceRect.left.toInt()}_${faceRect.top.toInt()}";
 
       // Debug log to help diagnose recognition mapping
-      print(
+      debugPrint(
           "📱 Painter looking for face ID: $faceId in ${recognizedStudents.keys}");
 
       // Check if this face is recognized

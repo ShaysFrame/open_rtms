@@ -47,9 +47,9 @@ class FaceDetectionPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // Print debug info
-    print("📱 Painting overlay with ${detections.length} detections");
-    print("📱 Preview size: ${previewSize.width}x${previewSize.height}");
-    print("📱 Screen size: ${screenSize.width}x${screenSize.height}");
+    debugPrint("📱 Painting overlay with ${detections.length} detections");
+    debugPrint("📱 Preview size: ${previewSize.width}x${previewSize.height}");
+    debugPrint("📱 Screen size: ${screenSize.width}x${screenSize.height}");
 
     if (detections.isEmpty) return;
 
@@ -58,7 +58,7 @@ class FaceDetectionPainter extends CustomPainter {
     final double scaleX = screenSize.width / previewSize.width;
     final double scaleY = screenSize.height / previewSize.height;
 
-    print("📱 Scale factors: $scaleX, $scaleY");
+    debugPrint("📱 Scale factors: $scaleX, $scaleY");
 
     final Paint recognizedBoxPaint = Paint()
       ..color = Colors.green

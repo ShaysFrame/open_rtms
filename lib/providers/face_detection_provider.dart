@@ -146,7 +146,7 @@ class FaceDetectionProvider with ChangeNotifier {
       final int safeW = min(image.width - safeX, w + (paddingX * 2));
       final int safeH = min(image.height - safeY, h + (paddingY * 2));
 
-      print(
+      debugPrint(
           "📱 Cropping face at ($safeX,$safeY,$safeW,$safeH) from ${image.width}x${image.height}");
 
       // Convert YUV to RGB
@@ -194,7 +194,7 @@ class FaceDetectionProvider with ChangeNotifier {
       await file.writeAsBytes(
           img.encodeJpg(resizedImage, quality: 100)); // Use highest quality
 
-      print(
+      debugPrint(
           "📱 Enhanced face image saved: ${file.path}, size: ${await file.length()} bytes");
       return file;
     } catch (e) {
@@ -269,7 +269,7 @@ class FaceDetectionProvider with ChangeNotifier {
 
       return outputImage;
     } catch (e) {
-      print("📱 YUV conversion error: $e");
+      debugPrint("📱 YUV conversion error: $e");
       // Return a larger blank image to make the error more obvious
       final errorImage = img.Image(width: 320, height: 240);
       img.fill(errorImage, color: img.ColorRgb8(255, 0, 0));
@@ -431,36 +431,27 @@ class FaceDetectionProvider with ChangeNotifier {
     }
   }
 
-  // Update the processCameraImage method to handle multiple faces
+  // IMPORTANT: When using ML Kit face detection
+  // The _detections field is updated by the recognition_screen using updateDetections()
+  // The processCameraImage method is mainly used to process faces for recognition
   Future<void> processCameraImage(CameraImage image) async {
     if (_isProcessing || !_isModelLoaded) return;
     _isProcessing = true;
 
     try {
-      final results = await _vision.yoloOnFrame(
-        bytesList: image.planes.map((plane) => plane.bytes).toList(),
-        imageHeight: image.height,
-        imageWidth: image.width,
-        iouThreshold: 0.4,
-        confThreshold: 0.5,
-        classThreshold: 0.5,
-      );
-
-      _detections = List<Map<String, dynamic>>.from(results);
-      _totalFacesDetected = _detections.length;
-
-      notifyListeners();
-
+      // Note: With ML Kit implementation, we're already getting the detections
+      // through the updateDetections method called from recognition_screen.dart
       final now = DateTime.now();
-      if (_detections.isEmpty ||
+
+      // Rate limiting API calls
+      if (_detections.isNotEmpty &&
           now.difference(_lastApiCallTime) <= _minApiCallInterval) {
         _isProcessing = false;
         return;
       }
 
-      _lastApiCallTime = now;
-
-      await sendFullImageForRecognition(image);
+      // NOTE: When using ML Kit, the _detections are already provided via updateDetections from ML Kit
+      // The detections are kept populated from the updateDetections() method
     } catch (e) {
       debugPrint('Error processing image: $e');
     } finally {
@@ -514,7 +505,7 @@ class FaceDetectionProvider with ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      print("📱 Error processing individual face: $e");
+      debugPrint("📱 Error processing individual face: $e");
     }
   }
 
@@ -549,9 +540,9 @@ class FaceDetectionProvider with ChangeNotifier {
 
     try {
       // Take a high-resolution photo
-      print("📱 Capturing high-resolution photo...");
+      debugPrint("📱 Capturing high-resolution photo...");
       final XFile photo = await controller.takePicture();
-      print("📱 Photo captured: ${photo.path}");
+      debugPrint("📱 Photo captured: ${photo.path}");
 
       // Load the image into memory
       final Uint8List bytes = await photo.readAsBytes();
@@ -563,7 +554,7 @@ class FaceDetectionProvider with ChangeNotifier {
       }
 
       // Run detection on the image using FlutterVision
-      print(
+      debugPrint(
           "📱 Running detection on photo with dimensions ${decodedImage.width}x${decodedImage.height}...");
       final results = await _vision.yoloOnImage(
         bytesList: bytes,
@@ -576,7 +567,7 @@ class FaceDetectionProvider with ChangeNotifier {
 
       final detections = List<Map<String, dynamic>>.from(results);
       _totalFacesDetected = detections.length;
-      print("📱 Found ${_totalFacesDetected} faces in classroom image");
+      debugPrint("📱 Found ${_totalFacesDetected} faces in classroom image");
 
       // Sort detections by size (largest faces first)
       detections.sort((a, b) {
@@ -598,7 +589,7 @@ class FaceDetectionProvider with ChangeNotifier {
 
         // Skip if we've already processed this detection
         if (processedDetectionIds.contains(detectionId)) {
-          print("📱 Skipping already processed detection");
+          debugPrint("📱 Skipping already processed detection");
           continue;
         }
 
@@ -611,7 +602,7 @@ class FaceDetectionProvider with ChangeNotifier {
             if (studentId != null &&
                 recognizedStudentIdsThisSession.contains(studentId)) {
               // Already recognized this student in this session
-              print(
+              debugPrint(
                   "📱 Skipping already recognized student: ${entry.value['name']}");
               alreadyRecognizedStudent = true;
               break;
@@ -622,7 +613,7 @@ class FaceDetectionProvider with ChangeNotifier {
         if (!alreadyRecognizedStudent) {
           try {
             // Extract and process the face
-            print("📱 Processing face ${i + 1}/${detections.length}");
+            debugPrint("📱 Processing face ${i + 1}/${detections.length}");
             final face = await _cropFaceFromImage(decodedImage, detection);
             await _recognizeFace(face, detection);
 
@@ -641,15 +632,15 @@ class FaceDetectionProvider with ChangeNotifier {
             }
 
             if (wasRecognized) {
-              print("📱 Successfully recognized face ${i + 1}");
+              debugPrint("📱 Successfully recognized face ${i + 1}");
             } else {
-              print("📱 Face ${i + 1} was not recognized");
+              debugPrint("📱 Face ${i + 1} was not recognized");
             }
 
             // Add a small delay to avoid overloading the backend
             await Future.delayed(const Duration(milliseconds: 800));
           } catch (e) {
-            print("📱 Error processing face $i: $e");
+            debugPrint("📱 Error processing face $i: $e");
           }
         }
 
@@ -662,10 +653,10 @@ class FaceDetectionProvider with ChangeNotifier {
         notifyListeners();
       }
 
-      print(
+      debugPrint(
           "📱 Batch processing complete. Recognized $recognizedInBatch new students.");
     } catch (e) {
-      print("📱 Error in batch processing: $e");
+      debugPrint("📱 Error in batch processing: $e");
     } finally {
       _isBatchProcessing = false;
       _batchProgress = 1.0;
@@ -840,7 +831,8 @@ class FaceDetectionProvider with ChangeNotifier {
       final file = File(path);
 
       await file.writeAsBytes(img.encodeJpg(fullImage, quality: 95));
-      print("📱 Saving full frame image: $path (${await file.length()} bytes)");
+      debugPrint(
+          "📱 Saving full frame image: $path (${await file.length()} bytes)");
 
       // Send to backend
       final request = http.MultipartRequest('POST', Uri.parse(_backendUrl));
@@ -894,7 +886,7 @@ class FaceDetectionProvider with ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      print("📱 Error sending full image: $e");
+      debugPrint("📱 Error sending full image: $e");
       debugPrint('Error sending full image to backend: $e');
     }
   }

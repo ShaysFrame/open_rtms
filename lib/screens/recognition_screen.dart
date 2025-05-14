@@ -4,8 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:open_rtms/providers/face_detection_provider.dart';
 import 'package:open_rtms/widgets/face_detection_overlay.dart';
 import 'package:open_rtms/services/camera_service.dart';
-import 'dart:typed_data';
-import 'package:image_picker/image_picker.dart';
+// ML Kit imports
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:open_rtms/screens/fixed_recognition_helper.dart';
 
 class RecognitionScreen extends StatefulWidget {
   const RecognitionScreen({super.key});
@@ -22,10 +23,22 @@ class _RecognitionScreenState extends State<RecognitionScreen>
   CameraLensDirection _currentDirection = CameraLensDirection.back;
   bool _recognitionActive = true; // Start with recognition active
 
+  // Add ML Kit Face Detector
+  late FaceDetector _faceDetector;
+
+  // Use the helper class for optimal face detector options
+  final FaceDetectorOptions _faceDetectorOptions =
+      MLKitHelper.getOptimalFaceDetectorOptions();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Initialize ML Kit face detector
+    _faceDetector = FaceDetector(options: _faceDetectorOptions);
+
+    // Get camera service
     final cameraService = Provider.of<CameraService>(context, listen: false);
     _initCamera(cameraService);
   }
@@ -66,10 +79,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
 
       await _cameraController.startImageStream((image) {
         if (!_isProcessing) {
-          _isProcessing = true;
-          detectionProvider.processCameraImage(image).then((_) {
-            _isProcessing = false;
-          });
+          _processCameraImage(image);
         }
       });
     } catch (e) {
@@ -89,13 +99,12 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     _isProcessing = true;
 
     // Add safety checks before stopping the stream
-    if (_cameraController != null &&
-        _cameraController.value.isInitialized &&
+    if (_cameraController.value.isInitialized &&
         !_cameraController.value.isStreamingImages) {
       try {
         await _cameraController.stopImageStream();
       } catch (e) {
-        print('Error stopping image stream: $e');
+        debugPrint('Error stopping image stream: $e');
         // Continue with disposal anyway
       }
     }
@@ -103,7 +112,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     try {
       await _cameraController.dispose();
     } catch (e) {
-      print('Error disposing camera: $e');
+      debugPrint('Error disposing camera: $e');
       // Continue with reinitialization anyway
     }
 
@@ -122,17 +131,11 @@ class _RecognitionScreenState extends State<RecognitionScreen>
       _recognitionActive = !_recognitionActive;
     });
 
-    final detectionProvider =
-        Provider.of<FaceDetectionProvider>(context, listen: false);
-
     if (_recognitionActive) {
       // Resume processing
       await _cameraController.startImageStream((image) {
         if (!_isProcessing) {
-          _isProcessing = true;
-          detectionProvider.processCameraImage(image).then((_) {
-            _isProcessing = false;
-          });
+          _processCameraImage(image);
         }
       });
 
@@ -159,6 +162,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cameraController.dispose();
+    _faceDetector.close(); // Close ML Kit face detector
     super.dispose();
   }
 
@@ -185,7 +189,6 @@ class _RecognitionScreenState extends State<RecognitionScreen>
 
     // Calculate proper dimensions for FaceDetectionOverlay
     final cameraSize = _cameraController.value.previewSize!;
-    final containerSize = MediaQuery.of(context).size;
 
 // Calculate AspectRatio for the camera container
     final cameraAspectRatio = cameraSize.height / cameraSize.width;
@@ -283,9 +286,9 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                               builder: (context, provider, child) {
                                 // Debug information about detections
                                 if (provider.detections.isNotEmpty) {
-                                  print(
+                                  debugPrint(
                                       "📱 Detections found: ${provider.detections.length}");
-                                  print(
+                                  debugPrint(
                                       "📱 First detection: ${provider.detections.first}");
                                 }
 
@@ -670,6 +673,94 @@ class _RecognitionScreenState extends State<RecognitionScreen>
       }
     } catch (e) {
       return 'Just now';
+    }
+  }
+
+  // Process camera frames with ML Kit face detection
+  Future<void> _processCameraImage(CameraImage image) async {
+    if (_isProcessing) return;
+    _isProcessing = true;
+
+    try {
+      // Convert camera image to ML Kit format
+      final inputImage = MLKitHelper.cameraImageToInputImage(
+          image, _cameraController.description);
+
+      if (inputImage == null) {
+        debugPrint("📱 Failed to convert camera image to ML Kit format");
+        _isProcessing = false;
+        return;
+      }
+
+      // Detect faces with ML Kit
+      final faces = await _faceDetector.processImage(inputImage);
+      debugPrint("📱 ML Kit detected ${faces.length} faces");
+
+      if (faces.isEmpty) {
+        _isProcessing = false;
+        return;
+      }
+
+      // We just need to convert faces to detections for the provider
+      // No need to store the ML Kit faces separately
+
+      // Get detection provider
+      final detectionProvider =
+          Provider.of<FaceDetectionProvider>(context, listen: false);
+
+      // Convert ML Kit faces to provider format
+      List<Map<String, dynamic>> detections = [];
+      Map<String, Map<String, dynamic>> mlKitFaceIds = {};
+
+      for (final face in faces) {
+        // Convert ML Kit face to provider format
+        final detection = MLKitHelper.mlKitToProviderFormat(face);
+
+        if (detection.isEmpty) continue; // Skip invalid faces
+
+        // Add to detections list
+        detections.add(detection);
+
+        // Create unique face ID
+        final faceId = MLKitHelper.createFaceId(face);
+
+        // Create placeholder entries for faces without recognition data
+        if (!detectionProvider.recognizedStudents.containsKey(faceId) ||
+            detectionProvider.recognizedStudents[faceId]?['student_id'] ==
+                null) {
+          mlKitFaceIds[faceId] = {
+            'name': 'Detecting...',
+            'student_id': null,
+            'confidence': 0.0,
+            'timestamp': DateTime.now().toString(),
+          };
+        }
+      }
+
+      // Update provider with detections
+      if (detections.isNotEmpty) {
+        detectionProvider.updateDetections(detections);
+
+        if (mlKitFaceIds.isNotEmpty) {
+          detectionProvider.addPlaceholders(mlKitFaceIds);
+        }
+
+        // Process with backend
+        try {
+          await detectionProvider.processCameraImage(image);
+        } catch (e) {
+          debugPrint("📱 Error processing with backend: $e");
+        }
+      }
+
+      // Update UI if needed
+      if (mounted && faces.isNotEmpty) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint("📱 Error in ML Kit face detection: $e");
+    } finally {
+      _isProcessing = false;
     }
   }
 }
