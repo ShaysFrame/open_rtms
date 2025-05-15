@@ -4,11 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_vision/flutter_vision.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
+import 'package:open_rtms/core/config/app_config.dart';
 import 'attendance_provider.dart';
 
 class FaceDetectionProvider with ChangeNotifier {
   final FlutterVision _vision = FlutterVision();
-  final String _backendUrl = 'http://10.134.30.235:8000/api/recognize/';
+  final String _backendUrl = 'http://${AppConfig.serverIp}:8000/api/recognize/';
 
   // Reference to centralized attendance provider
   AttendanceProvider? _attendanceProvider;
@@ -36,6 +37,9 @@ class FaceDetectionProvider with ChangeNotifier {
   List<Map<String, dynamic>> get detections => _detections;
   Map<String, Map<String, dynamic>> get recognizedStudents =>
       _recognizedStudents;
+  // Add getters for detection and recognition counts
+  int get totalFacesDetected => _totalFacesDetected;
+  int get totalFacesRecognized => _totalFacesRecognized;
 
   // Add method to update attendanceProvider
   void updateAttendanceProvider(AttendanceProvider attendanceProvider) {
@@ -53,14 +57,15 @@ class FaceDetectionProvider with ChangeNotifier {
     }
 
     notifyListeners();
-  }
+  } // Method to add placeholder entries for ML Kit detected faces
 
-  // Method to add placeholder entries for ML Kit detected faces
+  // This is kept for backward compatibility but now it just clears
+  // the recognition data and waits for actual backend results
   void addPlaceholders(Map<String, Map<String, dynamic>> mlKitFaceIds) {
-    // Add placeholders to the recognizedStudents map
-    mlKitFaceIds.forEach((key, value) {
-      _recognizedStudents[key] = value;
-    });
+    // Clear all existing entries - we'll only use what the backend returns
+    _recognizedStudents.clear();
+    _totalFacesRecognized = 0;
+
     notifyListeners();
   }
 
@@ -75,6 +80,53 @@ class FaceDetectionProvider with ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  // Helper method to process a recognized face
+  void _processRecognizedFace(String detectionId, String studentId,
+      String studentName, double confidence) {
+    // Update the centralized attendance provider if available
+    if (_attendanceProvider != null) {
+      _attendanceProvider!.addRecognizedStudent(
+        detectionId: detectionId,
+        studentId: studentId,
+        name: studentName,
+        confidence: confidence,
+        source: 'face_detection',
+      );
+    }
+
+    // Also update local map for backwards compatibility
+    _recognizedStudents[detectionId] = {
+      'name': studentName,
+      'student_id': studentId,
+      'confidence': confidence,
+      'timestamp': DateTime.now().toString(),
+    };
+  }
+
+  // Helper method for marking unknown faces
+  // DEPRECATED: This method is no longer used as we want to leave unknown faces unlabeled
+  // Keeping it for reference in case we need to revert the behavior
+  void _markFaceAsUnknown(String detectionId) {
+    // Update centralized attendance provider if available
+    if (_attendanceProvider != null) {
+      _attendanceProvider!.addRecognizedStudent(
+        detectionId: detectionId,
+        studentId: null,
+        name: 'Unknown',
+        confidence: 0.0,
+        source: 'face_detection',
+      );
+    }
+
+    // Also update local map for backwards compatibility
+    _recognizedStudents[detectionId] = {
+      'name': 'Unknown',
+      'student_id': null,
+      'confidence': 0.0,
+      'timestamp': DateTime.now().toString(),
+    };
   }
 
   // Public method to process uploaded images [!]
@@ -163,117 +215,134 @@ class FaceDetectionProvider with ChangeNotifier {
           // Parse response
           final data = jsonDecode(responseBody);
 
+          // Get summary info if available
+          int newlyMarked = 0;
+          int alreadyMarked = 0;
+          if (data.containsKey('summary')) {
+            final summary = data['summary'];
+            newlyMarked = summary['newly_marked'] ?? 0;
+            alreadyMarked = summary['already_marked'] ?? 0;
+            debugPrint(
+                "📱 Recognition summary: newly marked: $newlyMarked, already marked: $alreadyMarked");
+          }
+
           if (data.containsKey('results') && data['results'] is List) {
             final results = data['results'] as List;
             debugPrint(
                 "📱 Got ${results.length} recognition results from backend");
 
-            // Map the backend results to the ML Kit faces
-            if (results.isNotEmpty && _detections.isNotEmpty) {
-              // For each detected face from ML Kit, try to match with a backend result
-              for (int i = 0; i < _detections.length; i++) {
-                final detection = _detections[i];
-                final boxLeft = detection['box'][0];
-                final boxTop = detection['box'][1];
-                final detectionId = "${boxLeft.toInt()}_${boxTop.toInt()}";
+            // Clear ALL entries - we'll only add entries for faces recognized by the backend
+            _recognizedStudents.clear();
 
-                // The backend may return results in any order, so find the best match
-                // This is simplified logic - in reality you might want to map based on face position
-                if (i < results.length) {
-                  final result = results[i];
+            // First create a list of valid student results (no nulls)
+            // Exclude students marked as 'already_marked' from the UI to avoid duplicates
+            final validResults = results
+                .where((result) =>
+                    result.containsKey('student_id') &&
+                    result['student_id'] != null &&
+                    (result['status'] != 'already_marked'))
+                .toList();
 
-                  if (result.containsKey('student_id') &&
-                      result['student_id'] != null) {
-                    // Student recognized
-                    final studentId = result['student_id'] as String;
-                    final String studentName = result['name'] ?? "Unknown Name";
+            debugPrint(
+                "📱 Found ${validResults.length} valid student results to display");
 
-                    debugPrint(
-                        "📱 Mapping recognized student $studentName to face ID: $detectionId");
+            // Process only these valid backend results - exactly the number returned!
+            for (final result in validResults) {
+              final String studentId = result['student_id'];
+              final String studentName = result['name'] ?? "Unknown";
 
-                    // Store in session tracking (legacy)
-                    recognizedStudentIdsThisSession.add(studentId);
+              // Always add to the tracking set even if already marked
+              recognizedStudentIdsThisSession.add(studentId);
 
-                    // Calculate confidence
-                    double confidence = 1.0;
-                    if (result.containsKey('distance')) {
-                      confidence = 1.0 - (result['distance'] ?? 0.0);
-                      confidence = confidence.clamp(0.0, 1.0);
-                    }
+              // Calculate confidence
+              double confidence = 1.0;
+              if (result.containsKey('distance')) {
+                confidence = 1.0 - (result['distance'] ?? 0.0);
+                confidence = confidence.clamp(0.0, 1.0);
+              }
 
-                    // Update the centralized attendance provider if available
-                    if (_attendanceProvider != null) {
-                      _attendanceProvider!.addRecognizedStudent(
-                        detectionId: detectionId,
-                        studentId: studentId,
-                        name: studentName,
-                        confidence: confidence,
-                        source: 'face_detection',
-                      );
-                    }
+              // Try to find the best matching face detection
+              // based on position if available
+              String? bestMatchDetectionId;
+              int closestDistance = 1000000; // Large number to start
 
-                    // Also update local map for backwards compatibility
-                    _recognizedStudents[detectionId] = {
-                      'name': studentName,
-                      'student_id': studentId,
-                      'confidence': confidence,
-                      'timestamp': DateTime.now().toString(),
-                    };
-                  } else {
-                    // Unknown face from backend
-                    debugPrint(
-                        "📱 Face $i not recognized by backend, marking as Unknown");
+              if (result.containsKey('face_location') &&
+                  _detections.isNotEmpty) {
+                final faceLocation = result['face_location'];
+                final int backendX = faceLocation['x'];
+                final int backendY = faceLocation['y'];
 
-                    // Update centralized attendance provider
-                    if (_attendanceProvider != null) {
-                      _attendanceProvider!.addRecognizedStudent(
-                        detectionId: detectionId,
-                        studentId: null,
-                        name: 'Unknown',
-                        confidence: 0.0,
-                        source: 'face_detection',
-                      );
-                    }
+                // Find the closest detected face to this backend result
+                for (final detection in _detections) {
+                  final boxLeft = detection['box'][0];
+                  final boxTop = detection['box'][1];
+                  final detectedX = boxLeft.toInt();
+                  final detectedY = boxTop.toInt();
 
-                    // Also update local map for backwards compatibility
-                    _recognizedStudents[detectionId] = {
-                      'name': 'Unknown',
-                      'student_id': null,
-                      'confidence': 0.0,
-                      'timestamp': DateTime.now().toString(),
-                    };
+                  final int xDiff = (detectedX - backendX).abs();
+                  final int yDiff = (detectedY - backendY).abs();
+                  final int distance = xDiff + yDiff;
+
+                  if (distance < closestDistance && distance < 100) {
+                    // Use threshold of 100
+                    closestDistance = distance;
+                    bestMatchDetectionId = "${detectedX}_${detectedY}";
                   }
-                } else {
-                  // More faces detected by ML Kit than recognized by backend
+                }
+
+                if (bestMatchDetectionId != null) {
                   debugPrint(
-                      "📱 No matching backend result for face ID: $detectionId");
+                      "📱 Matched student $studentName to detection ID: $bestMatchDetectionId");
+                  _processRecognizedFace(
+                      bestMatchDetectionId, studentId, studentName, confidence);
+                  // ID is already tracked in validResults filtered list and _processRecognizedFace
+                } else {
+                  debugPrint(
+                      "📱 Could not find a matching detection for student $studentName");
+                  // If no matching detection found, create a synthetic ID based on backend coords
+                  final syntheticId = "${backendX}_${backendY}";
+                  _processRecognizedFace(
+                      syntheticId, studentId, studentName, confidence);
+                  // ID is already tracked in validResults filtered list and _processRecognizedFace
+                }
+              } else {
+                // If no face location in backend result, use index-based matching as fallback
+                // but only if we have detections
+                if (_detections.isNotEmpty &&
+                    validResults.indexOf(result) < _detections.length) {
+                  final detection = _detections[validResults.indexOf(result)];
+                  final boxLeft = detection['box'][0];
+                  final boxTop = detection['box'][1];
+                  final detectionId = "${boxLeft.toInt()}_${boxTop.toInt()}";
 
-                  // Update centralized attendance provider
-                  if (_attendanceProvider != null) {
-                    _attendanceProvider!.addRecognizedStudent(
-                      detectionId: detectionId,
-                      studentId: null,
-                      name: 'Unknown',
-                      confidence: 0.0,
-                      source: 'face_detection',
-                    );
-                  }
-
-                  // Also update local map for backwards compatibility
-                  _recognizedStudents[detectionId] = {
-                    'name': 'Unknown',
-                    'student_id': null,
-                    'confidence': 0.0,
-                    'timestamp': DateTime.now().toString(),
-                  };
+                  debugPrint(
+                      "📱 Using index-based matching for student $studentName");
+                  _processRecognizedFace(
+                      detectionId, studentId, studentName, confidence);
+                  // ID is already tracked in validResults filtered list and _processRecognizedFace
+                } else {
+                  // If all else fails, create a synthetic ID
+                  final syntheticId =
+                      "synthetic_${validResults.indexOf(result)}";
+                  debugPrint(
+                      "📱 Using synthetic ID for student $studentName: $syntheticId");
+                  _processRecognizedFace(
+                      syntheticId, studentId, studentName, confidence);
+                  // ID is already tracked in validResults filtered list and _processRecognizedFace
                 }
               }
             }
 
-            // Update recognition count
-            _totalFacesRecognized = _recognizedStudents.values
-                .where((student) => student['student_id'] != null)
-                .length;
+            // Set total recognized to exactly the number from the backend
+            _totalFacesRecognized = _recognizedStudents.length;
+
+            debugPrint(
+                "📱 Recognition summary: Found ${_detections.length} faces, recognized ${_totalFacesRecognized} students");
+            // Debug: print recognized students
+            for (final entry in _recognizedStudents.entries) {
+              debugPrint(
+                  "📱 Recognized: ${entry.value['name']} (ID: ${entry.value['student_id']})");
+            }
 
             // Update UI
             notifyListeners();

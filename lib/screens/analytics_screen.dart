@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 // import 'package:flutter/services.dart';
@@ -59,18 +58,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               .where((student) => student['student_id'] != null)
               .toList();
 
-          return Column(
-            children: [
-              // Session Info Card
-              _buildSessionInfoCard(provider),
-
-              // Statistics Summary
-              _buildStatisticsCard(provider),
-
-              // Student List
-              Expanded(
-                child: provider.recognizedStudents.isEmpty
-                    ? const Center(
+          return CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: _buildSessionInfoCard(provider)),
+              SliverToBoxAdapter(child: _buildStatisticsCard(provider)),
+              provider.recognizedStudents.isEmpty
+                  ? const SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Center(
                         child: Text(
                           'No attendance data available.\nStart a new attendance session to collect data.',
                           textAlign: TextAlign.center,
@@ -79,9 +74,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             color: Colors.grey,
                           ),
                         ),
-                      )
-                    : _buildStudentList(presentStudents),
-              ),
+                      ),
+                    )
+                  : SliverFillRemaining(
+                      child: _buildStudentList(presentStudents),
+                    ),
             ],
           );
         },
@@ -103,14 +100,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const Icon(Icons.event_note, size: 20, color: Colors.blue),
                 const SizedBox(width: 8),
-                Text(
-                  provider.sessionName ?? 'Attendance Session',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                // Wrap the session name in an Expanded and Text with maxLines and overflow
+                Expanded(
+                  child: Text(
+                    provider.sessionName ?? 'Attendance Session',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -425,7 +428,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       final sessionTime = DateFormat('HH:mm').format(provider.sessionStartTime);
 
       // Create PDF document with default fonts
-      // We'll avoid using custom TTF fonts since they're causing parsing issues
       final pdf = pw.Document();
 
       // Add page
@@ -475,7 +477,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       ),
                       pw.SizedBox(height: 4),
                       pw.Text(
-                        'Date: $sessionDate • Time: $sessionTime',
+                        'Date: $sessionDate | Time: $sessionTime',
                         style: const pw.TextStyle(fontSize: 12),
                       ),
                       pw.SizedBox(height: 4),

@@ -100,6 +100,8 @@ class FaceDetectionPainter extends CustomPainter {
       // Check if this face is recognized
       final detectionId = "${detection['box'][0]}_${detection['box'][1]}";
       final studentInfo = recognizedStudents[detectionId];
+      // A face is recognized if it has an entry in the recognizedStudents map
+      // AND that entry has a non-null student_id
       final bool isRecognized =
           studentInfo != null && studentInfo['student_id'] != null;
 
@@ -111,8 +113,9 @@ class FaceDetectionPainter extends CustomPainter {
 
       // Draw name label if recognized
       if (isRecognized) {
+        // We know studentInfo is not null here because isRecognized checks for it
         final textSpan = TextSpan(
-          text: " ${studentInfo!['name']} ",
+          text: " ${studentInfo['name']} ",
           style: textStyle,
         );
         final textPainter = TextPainter(

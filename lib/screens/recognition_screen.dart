@@ -3,13 +3,9 @@ import 'package:camera/camera.dart';
 import 'package:lottie/lottie.dart';
 import 'package:open_rtms/providers/person_detection_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:open_rtms/providers/face_detection_provider.dart';
 import 'package:open_rtms/providers/attendance_provider.dart';
 import 'package:open_rtms/screens/analytics_screen.dart';
-import 'package:open_rtms/widgets/face_detection_overlay.dart';
 import 'package:open_rtms/services/camera_service.dart';
-import 'dart:typed_data';
-import 'package:image_picker/image_picker.dart';
 
 class RecognitionScreen extends StatefulWidget {
   const RecognitionScreen({super.key});
@@ -446,12 +442,25 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    'Recognition Progress: $recognized/$detected',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Recognition Progress: $recognized/$detected',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Newly marked: ${provider.recognizedStudents.values.where((s) => s['status'] != 'already_marked').length}',
+                                        style: TextStyle(
+                                          color: Colors.green.shade300,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                   if (provider.isBatchProcessing)
                                     Text(
@@ -464,12 +473,39 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              LinearProgressIndicator(
-                                value: provider.isBatchProcessing
-                                    ? provider.batchProgress
-                                    : progress,
-                                backgroundColor: Colors.grey.shade800,
-                                color: Colors.green,
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: LinearProgressIndicator(
+                                      value: provider.isBatchProcessing
+                                          ? provider.batchProgress
+                                          : progress,
+                                      backgroundColor: Colors.grey.shade800,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Face count indicators
+                                  if (!provider.isBatchProcessing &&
+                                      detected > 0)
+                                    Row(
+                                      children: List.generate(
+                                        detected.clamp(
+                                            0, 5), // Show max 5 indicators
+                                        (i) => Padding(
+                                          padding:
+                                              const EdgeInsets.only(left: 2),
+                                          child: Icon(
+                                            Icons.face,
+                                            size: 16,
+                                            color: i < recognized
+                                                ? Colors.green
+                                                : Colors.grey,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ],
                           ),
@@ -540,33 +576,64 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Recognized Students',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.refresh,
-                                color: Colors.white70),
-                            onPressed: () {
-                              // Get the central attendance provider and reset it
-                              Provider.of<AttendanceProvider>(context,
-                                      listen: false)
-                                  .resetAttendance();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Attendance data reset'),
-                                  behavior: SnackBarBehavior.floating,
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Recognized Students',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
                                 ),
-                              );
-                            },
-                            tooltip: 'Reset Attendance',
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.refresh,
+                                    color: Colors.white70),
+                                onPressed: () {
+                                  // Get the central attendance provider and reset it
+                                  Provider.of<AttendanceProvider>(context,
+                                          listen: false)
+                                      .resetAttendance();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Attendance data reset'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                },
+                                tooltip: 'Reset Attendance',
+                              ),
+                            ],
+                          ),
+                          // Add summary stats row
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Row(
+                              children: [
+                                _buildAttendanceStat('Total',
+                                    presentStudents.length, Colors.white),
+                                const SizedBox(width: 16),
+                                _buildAttendanceStat(
+                                    'New',
+                                    presentStudents
+                                        .where((s) =>
+                                            s['status'] != 'already_marked')
+                                        .length,
+                                    Colors.green),
+                                const SizedBox(width: 16),
+                                _buildAttendanceStat(
+                                    'Already Marked',
+                                    presentStudents
+                                        .where((s) =>
+                                            s['status'] == 'already_marked')
+                                        .length,
+                                    Colors.blue),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -583,7 +650,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                       )
                     else
                       SizedBox(
-                        height: 100,
+                        height: 120,
                         child: ListView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                           scrollDirection: Axis.horizontal,
@@ -597,8 +664,12 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                                 decoration: BoxDecoration(
                                   gradient: LinearGradient(
                                     colors: [
-                                      Colors.green.shade800,
-                                      Colors.green.shade900,
+                                      student['status'] == 'already_marked'
+                                          ? Colors.blue.shade800
+                                          : Colors.green.shade800,
+                                      student['status'] == 'already_marked'
+                                          ? Colors.blue.shade900
+                                          : Colors.green.shade900,
                                     ],
                                     begin: Alignment.topLeft,
                                     end: Alignment.bottomRight,
@@ -612,8 +683,10 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                                   children: [
                                     Row(
                                       children: [
-                                        const Icon(
-                                          Icons.check_circle,
+                                        Icon(
+                                          student['status'] == 'already_marked'
+                                              ? Icons.history
+                                              : Icons.check_circle,
                                           color: Colors.white,
                                           size: 16,
                                         ),
@@ -630,6 +703,29 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                                           ),
                                         ),
                                       ],
+                                    ),
+                                    // Add status badge
+                                    Container(
+                                      margin: const EdgeInsets.only(top: 4),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: student['status'] ==
+                                                'already_marked'
+                                            ? Colors.blue.shade700
+                                            : Colors.green.shade700,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        student['status'] == 'already_marked'
+                                            ? 'Already Marked'
+                                            : 'Newly Marked',
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.9),
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
@@ -671,6 +767,37 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                 ),
               );
             },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttendanceStat(String label, int count, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.8),
+              fontSize: 10,
+            ),
+          ),
+          Text(
+            count.toString(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
           ),
         ],
       ),

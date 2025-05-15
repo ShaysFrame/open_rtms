@@ -1,12 +1,13 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:open_rtms/core/config/app_config.dart';
 
 class StudentProvider with ChangeNotifier {
   File? _currentImage;
 
   File? get currentImage => _currentImage;
-  final String _backendUrl = 'http://10.134.30.235:8000/api/register/';
+  final String _backendUrl = 'http://${AppConfig.serverIp}:8000/api/register/';
 
   Future<void> setCurrentImage(dynamic image) async {
     if (image is String) {

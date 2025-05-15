@@ -57,22 +57,58 @@ class AttendanceProvider with ChangeNotifier {
     required String name,
     required double confidence,
     String source = 'unknown', // 'face_detection' or 'person_detection'
+    String status = 'newly_marked', // 'newly_marked' or 'already_marked'
   }) {
     // Only track as recognized if we have a valid student ID
     if (studentId != null) {
-      recognizedStudentIdsThisSession.add(studentId);
-      _totalStudentsRecognized = recognizedStudentIdsThisSession.length;
+      // Check if this student is already in the recognized list to prevent duplicates
+      bool alreadyPresent = false;
+
+      // First check if this exact student ID is already in the session
+      if (recognizedStudentIdsThisSession.contains(studentId)) {
+        // Student ID already recognized in this session
+
+        // Check if we already have a UI entry for this student
+        for (final entry in _recognizedStudents.values) {
+          if (entry['student_id'] == studentId) {
+            alreadyPresent = true;
+            debugPrint(
+                '📱 Student $name (ID: $studentId) already in attendance list - skipping duplicate');
+            break;
+          }
+        }
+      }
+
+      // If not already present, add to the tracking set
+      if (!alreadyPresent) {
+        recognizedStudentIdsThisSession.add(studentId);
+        _totalStudentsRecognized = recognizedStudentIdsThisSession.length;
+
+        // Add to the recognized students map
+        _recognizedStudents[detectionId] = {
+          'name': name,
+          'student_id': studentId,
+          'confidence': confidence,
+          'timestamp': DateTime.now().toString(),
+          'source': source,
+          'status': status,
+        };
+
+        notifyListeners();
+      }
+    } else {
+      // For detections without a student ID (unknown faces)
+      _recognizedStudents[detectionId] = {
+        'name': name,
+        'student_id': studentId,
+        'status': 'unknown_face',
+        'confidence': confidence,
+        'timestamp': DateTime.now().toString(),
+        'source': source,
+      };
+
+      notifyListeners();
     }
-
-    _recognizedStudents[detectionId] = {
-      'name': name,
-      'student_id': studentId,
-      'confidence': confidence,
-      'timestamp': DateTime.now().toString(),
-      'source': source,
-    };
-
-    notifyListeners();
   }
 
   void updateDetectionCount(int count) {
@@ -84,6 +120,8 @@ class AttendanceProvider with ChangeNotifier {
     _recognizedStudents.clear();
     recognizedStudentIdsThisSession.clear();
     _totalStudentsDetected = 0;
+    _totalStudentsRecognized = 0;
+    debugPrint('📱 Attendance reset - all counters cleared');
     _totalStudentsRecognized = 0;
     notifyListeners();
   }

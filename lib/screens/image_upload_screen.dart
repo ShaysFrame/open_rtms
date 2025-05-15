@@ -1,3 +1,4 @@
+import 'dart:developer';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -71,7 +72,7 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
       final frameInfo = await codec.getNextFrame();
       return frameInfo.image;
     } catch (e) {
-      print("📱 Error converting file to UI Image: $e");
+      log("📱 Error converting file to UI Image: $e");
       return null;
     }
   }
@@ -113,9 +114,8 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
           _uiImage = uiImage;
         });
 
-        print("📱 Image converted to UI Image: ${_uiImage != null}");
-        print(
-            "📱 Image dimensions: ${_imageSize!.width}x${_imageSize!.height}");
+        log("📱 Image converted to UI Image: ${_uiImage != null}");
+        log("📱 Image dimensions: ${_imageSize!.width}x${_imageSize!.height}");
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -142,43 +142,39 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
       final detectionProvider =
           Provider.of<FaceDetectionProvider>(context, listen: false);
 
-      print("📱 Processing image with ML Kit...");
+      log("📱 Processing image with ML Kit...");
 
       try {
         // Create an input image from the selected file
         final inputImage = InputImage.fromFile(_selectedImage!);
-        print("📱 Created input image from file: ${_selectedImage!.path}");
+        log("📱 Created input image from file: ${_selectedImage!.path}");
 
         // Process the image with ML Kit
         _mlKitFaces = await _faceDetector.processImage(inputImage);
-        print(
-            "📱 ML Kit face detection complete. Found ${_mlKitFaces.length} faces.");
+        log("📱 ML Kit face detection complete. Found ${_mlKitFaces.length} faces.");
 
         // Log details about each detected face
         for (int i = 0; i < _mlKitFaces.length; i++) {
           final face = _mlKitFaces[i];
           final rect = face.boundingBox;
-          print(
-              "📱 Face #$i - Rect: ${rect.left},${rect.top},${rect.width},${rect.height}");
-          print(
-              "📱 Face #$i - Landmarks: ${face.landmarks.length}, HeadAngle: ${face.headEulerAngleY}");
+          log("📱 Face #$i - Rect: ${rect.left},${rect.top},${rect.width},${rect.height}");
+          log("📱 Face #$i - Landmarks: ${face.landmarks.length}, HeadAngle: ${face.headEulerAngleY}");
         }
       } catch (e) {
-        print("📱 Error during ML Kit face detection: $e");
+        log("📱 Error during ML Kit face detection: $e");
         rethrow;
       }
 
       // Read image bytes for recognition and UI display
       final bytes = await _selectedImage!.readAsBytes();
-      print("📱 Image bytes read: ${bytes.length} bytes");
+      log("📱 Image bytes read: ${bytes.length} bytes");
 
       // Get image dimensions
       final decodedImage = img.decodeImage(bytes);
       if (decodedImage == null) {
         throw Exception("Failed to decode image");
       }
-      print(
-          "📱 Image decoded successfully: ${decodedImage.width}x${decodedImage.height}");
+      log("📱 Image decoded successfully: ${decodedImage.width}x${decodedImage.height}");
 
       // Update the image size for UI and ensure we have a UI Image for painting
       final uiImage = await fileToUiImage(_selectedImage!);
@@ -210,46 +206,34 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
 
       // Check if we have any faces detected by ML Kit
       if (_mlKitFaces.isNotEmpty) {
-        print("📱 Found ${_mlKitFaces.length} faces with ML Kit");
+        log("📱 Found ${_mlKitFaces.length} faces with ML Kit");
 
         // Instead of processing individual faces, send the whole image to the backend
-        print("📱 Sending full image to backend for recognition...");
+        log("📱 Sending full image to backend for recognition...");
 
         try {
-          // Initialize fake detection box IDs to match ML Kit faces
-          Map<String, Map<String, dynamic>> mlKitFaceIds = {};
-          for (int i = 0; i < _mlKitFaces.length; i++) {
-            final face = _mlKitFaces[i];
-            final rect = face.boundingBox;
-            final faceId = "${rect.left.toInt()}_${rect.top.toInt()}";
-
-            // Create placeholder entries in the recognized students map
-            mlKitFaceIds[faceId] = {
-              'name': 'Processing...',
-              'student_id': null,
-              'confidence': 0.0,
-              'timestamp': DateTime.now().toString(),
-            };
-            print("📱 Added placeholder for face ID: $faceId");
-          }
+          // Clear any previous detections and recognition results first
+          detectionProvider.resetAttendance();
 
           // Update the detections in the provider for UI display
+          // This only updates the boxes that will be drawn, not the recognition data
           detectionProvider.updateDetections(detections);
 
-          // Add placeholders for detected faces
-          detectionProvider.addPlaceholders(mlKitFaceIds);
+          // Now we'll send the image to the backend without adding placeholders
+          // The backend will determine which faces match to students
 
           // Send the full image to the backend
-          print("📱 Sending full image to backend for recognition");
+          log("📱 Sending full image to backend for recognition");
           await detectionProvider.processUploadedImage(_selectedImage!);
-          print("📱 Backend recognition complete");
+          log("📱 Backend recognition complete");
+          log("📱 Recognized ${detectionProvider.totalFacesRecognized} students out of ${detectionProvider.totalFacesDetected} detected faces");
 
           // Manually map the results from backend to ML Kit detected faces
           await Future.delayed(
               const Duration(milliseconds: 500)); // Give UI time to update
           setState(() {});
         } catch (e) {
-          print('📱 Error sending image to backend: $e');
+          log('📱 Error sending image to backend: $e');
         }
 
         // Check if any faces were recognized after processing
@@ -258,27 +242,26 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
             .toList();
 
         if (recognizedFaces.isEmpty) {
-          print("📱 No students were recognized from the detected faces");
+          log("📱 No students were recognized from the detected faces");
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
                 content: Text('No students recognized in the image')),
           );
         } else {
-          print(
-              "📱 Successfully recognized ${recognizedFaces.length} students");
+          log("📱 Successfully recognized ${recognizedFaces.length} students");
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content: Text('${recognizedFaces.length} students recognized')),
           );
         }
       } else {
-        print("📱 No faces detected in the image");
+        log("📱 No faces detected in the image");
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No faces detected in the image')),
         );
       }
     } catch (e) {
-      print("📱 Critical error processing image: $e");
+      log("📱 Critical error processing image: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error processing image: $e')),
       );
@@ -292,7 +275,7 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
   // Method to crop a detected face from the image
   Future<File> _cropFaceFromImage(img.Image fullImage, Face face) async {
     try {
-      print('📱 Cropping face from ML Kit detection');
+      log('📱 Cropping face from ML Kit detection');
 
       // Get face bounding box
       final rect = face.boundingBox;
@@ -315,8 +298,7 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
           ? fullImage.height - safeY
           : h + (paddingY * 2);
 
-      print(
-          '📱 Cropping area: x=$safeX, y=$safeY, w=$safeW, h=$safeH from image size ${fullImage.width}x${fullImage.height}');
+      log('📱 Cropping area: x=$safeX, y=$safeY, w=$safeW, h=$safeH from image size ${fullImage.width}x${fullImage.height}');
 
       // Crop the face region
       final faceImage = img.copyCrop(
@@ -350,12 +332,11 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
       final file = File(path);
 
       await file.writeAsBytes(img.encodeJpg(resizedImage, quality: 100));
-      print(
-          '📱 Enhanced face image saved: ${file.path}, size: ${await file.length()} bytes');
+      log('📱 Enhanced face image saved: ${file.path}, size: ${await file.length()} bytes');
 
       return file;
     } catch (e) {
-      print('📱 Error cropping face: $e');
+      log('📱 Error cropping face: $e');
 
       // Create a placeholder image in case of error
       final directory = await getTemporaryDirectory();
@@ -467,10 +448,8 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
                                   builder: (context, provider, child) {
                                     // Check if we have faces detected by ML Kit
                                     if (_mlKitFaces.isNotEmpty) {
-                                      print(
-                                          "📱 Rendering ${_mlKitFaces.length} ML Kit faces on image ${_imageSize!.width}x${_imageSize!.height}");
-                                      print(
-                                          "📱 UI Image available for rendering: ${_uiImage != null}");
+                                      log("📱 Rendering ${_mlKitFaces.length} ML Kit faces on image ${_imageSize!.width}x${_imageSize!.height}");
+                                      log("📱 UI Image available for rendering: ${_uiImage != null}");
 
                                       return Stack(
                                         children: [
@@ -505,7 +484,7 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
                                                     BorderRadius.circular(4),
                                               ),
                                               child: const Text(
-                                                '',
+                                                'Open RTMS',
                                                 style: TextStyle(
                                                   color: Colors.white,
                                                   fontSize: 12,
@@ -517,8 +496,7 @@ class _ImageUploadScreenState extends State<ImageUploadScreen> {
                                       );
                                     } else if (provider.detections.isNotEmpty) {
                                       // Fallback to YOLO detections
-                                      print(
-                                          "📱 Falling back to YOLO detections: ${provider.detections.length}");
+                                      log("📱 Falling back to YOLO detections: ${provider.detections.length}");
                                       return FaceDetectionOverlay(
                                         detections: provider.detections,
                                         recognizedStudents:
