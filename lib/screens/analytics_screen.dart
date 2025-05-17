@@ -191,7 +191,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   children: [
                     Expanded(
                       child: _buildStatItem(
-                          'Face Detection',
+                          'Static Detection',
                           faceDetectionCount.toString(),
                           Icons.face,
                           Colors.blue),
@@ -199,7 +199,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: _buildStatItem(
-                          'Person Detection',
+                          'Live Detection',
                           personDetectionCount.toString(),
                           Icons.person_outline,
                           Colors.orange),
@@ -222,12 +222,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     Colors.green),
               ),
               Expanded(
-                child: _buildStatItem('Face Detection',
+                child: _buildStatItem('Static Detection',
                     faceDetectionCount.toString(), Icons.face, Colors.blue),
               ),
               Expanded(
                 child: _buildStatItem(
-                    'Person Detection',
+                    'Live Detection',
                     personDetectionCount.toString(),
                     Icons.person_outline,
                     Colors.orange),
@@ -516,11 +516,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 _buildPdfStatBox('Total Students Present',
                     '${presentStudents.length}', PdfColors.green),
                 _buildPdfStatBox(
-                    'Face Detection',
+                    'Static Detection',
                     '${presentStudents.where((s) => (s['source'] as String?) == 'face_detection').length}',
                     PdfColors.blue),
                 _buildPdfStatBox(
-                    'Person Detection',
+                    'Live Detection',
                     '${presentStudents.where((s) => (s['source'] as String?) == 'person_detection').length}',
                     PdfColors.orange),
               ],

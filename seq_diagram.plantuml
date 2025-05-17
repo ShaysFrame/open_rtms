@@ -48,20 +48,6 @@ participant "Camera Feed" as Camera
 participant "Django API" as API
 participant "ML Model/DB" as MLDB
 
-User -> App : Enter student info / select photo
-App -> API : POST /api/register/ (student info + photo)
-API -> MLDB : Validate & store student, process image
-MLDB --> API : Detection/recognition result, DB update
-API --> App : Registration result (success/failure)
-App --> User : Show result (success/error message)
-
-User -> App : Upload image for recognition
-App -> API : POST /api/recognize/ (image)
-API -> MLDB : Detect/recognize faces
-MLDB --> API : Recognition results
-API --> App : Recognition results (JSON)
-App --> User : Show recognized students/attendance
-
 note over User, MLDB
   Live Camera Attendance Flow
 end note
@@ -93,5 +79,23 @@ deactivate Camera
 App -> App : Finalize attendance data
 App --> User : Show attendance summary
 deactivate App
+
+note over User, MLDB
+  Static Camera Attendance Flow
+end note
+
+User -> App : Enter student info / select photo
+App -> API : POST /api/register/ (student info + photo)
+API -> MLDB : Validate & store student, process image
+MLDB --> API : Detection/recognition result, DB update
+API --> App : Registration result (success/failure)
+App --> User : Show result (success/error message)
+
+User -> App : Upload image for recognition
+App -> API : POST /api/recognize/ (image)
+API -> MLDB : Detect/recognize faces
+MLDB --> API : Recognition results
+API --> App : Recognition results (JSON)
+App --> User : Show recognized students/attendance
 
 @enduml
